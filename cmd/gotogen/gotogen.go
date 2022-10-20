@@ -14,8 +14,11 @@ func blink() {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func earlyPanic() {
-	for {
+func earlyPanic(err error) {
+	for i := 0; ; i++ {
 		blink()
+		if i%5 == 0 {
+			println(err)
+		}
 	}
 }

@@ -4,10 +4,10 @@ package main
 
 import (
 	"machine"
-	"time"
 
 	"github.com/ajanata/gotogen"
 	"tinygo.org/x/drivers"
+	"tinygo.org/x/drivers/hub75"
 	"tinygo.org/x/drivers/ssd1306"
 )
 
@@ -27,18 +27,38 @@ func main() {
 	dev.ClearDisplay()
 	blink()
 
-	g, err := gotogen.New(60, nil, &dev, machine.LED, func() (faceDisplay drivers.Displayer, menuInput gotogen.MenuInput, boopSensor gotogen.BoopSensor, err error) {
-		return nil, nil, nil, nil
+	// NOTE: we cannot blink the LED after we init SPI1 since its SCK is the same pin as the LED, so we actually can't
+	// use machine.LED for the Blinker.
+	// TODO try using a different SPI.
+	g, err := gotogen.New(60, nil, &dev, nil, func() (faceDisplay drivers.Displayer, menuInput gotogen.MenuInput, boopSensor gotogen.BoopSensor, err error) {
+		machine.SPI1.Configure(machine.SPIConfig{
+			// Frequency: 25 * machine.MHz,
+			Frequency: 18 * machine.MHz,
+			SDI:       machine.SPI1_SDI_PIN,
+			SDO:       machine.SPI1_SDO_PIN,
+			SCK:       machine.SPI1_SCK_PIN,
+			CS:        machine.SPI1_CS_PIN,
+		})
+		rgb := hub75.New(machine.SPI1, machine.D3, machine.D2, machine.D6, machine.D7, machine.D8, machine.D9)
+		rgb.Configure(hub75.Config{
+			Width:      128,
+			Height:     32,
+			ColorDepth: 3,
+			RowPattern: 16,
+			FastUpdate: true,
+			// Brightness: 0x3F,
+		})
+		rgb.ClearDisplay()
+
+		return &rgb, nil, nil, nil
 	})
 	if err != nil {
-		earlyPanic()
+		earlyPanic(err)
 	}
 	err = g.Init()
 	if err != nil {
-		earlyPanic()
+		earlyPanic(err)
 	}
 
-	for {
-		time.Sleep(time.Hour)
-	}
+	g.Run()
 }

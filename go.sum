@@ -1,5 +1,7 @@
-github.com/ajanata/tinygo-drivers v0.0.0-20221010064956-016cdce8a129 h1:MpBSd4+S7gyKKH80g/LV1yY8KpCmj+dW/MSoutbel/8=
-github.com/ajanata/tinygo-drivers v0.0.0-20221010064956-016cdce8a129/go.mod h1:J4+51Li1kcfL5F93kmnDWEEzQF3bLGz0Am3Q7E2a8/E=
+github.com/ajanata/aykevl-things v0.0.0-20221020024843-41125654b861 h1:5DtlNRGBoNfDlrI+D7kmS0cgFr9mbksLEgSJ4BjiL4c=
+github.com/ajanata/aykevl-things v0.0.0-20221020024843-41125654b861/go.mod h1:Moi/1uxppRxz5KRXHaVnaolsdDW1jKol9WBoJoFcQOA=
+github.com/ajanata/tinygo-drivers v0.0.0-20221017002437-9bf48ad71415 h1:w36+VtF8QQ3I4Yt+MP/oj97taLjepjgQ1jmkVKOHi5A=
+github.com/ajanata/tinygo-drivers v0.0.0-20221017002437-9bf48ad71415/go.mod h1:J4+51Li1kcfL5F93kmnDWEEzQF3bLGz0Am3Q7E2a8/E=
 github.com/bgould/http v0.0.0-20190627042742-d268792bdee7/go.mod h1:BTqvVegvwifopl4KTEDth6Zezs9eR+lCWhvGKvkxJHE=
 github.com/eclipse/paho.mqtt.golang v1.2.0/go.mod h1:H9keYFcgq3Qr5OUJm/JZI/i6U7joQ8SYLhZwfeOo6Ts=
 github.com/frankban/quicktest v1.10.2/go.mod h1:K+q6oSqb0W0Ininfk863uOk1lMy69l/P6txr3mVT54s=
