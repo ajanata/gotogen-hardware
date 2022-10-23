@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"machine"
 	"time"
+	"tinygo.org/x/drivers/apds9960"
 
 	"github.com/ajanata/textbuf"
-	"tinygo.org/x/drivers/sdcard"
 	"tinygo.org/x/drivers/ssd1306"
 )
 
@@ -45,35 +45,35 @@ func main() {
 
 	buf.Println("playground boot")
 	println("boot")
+	//
+	// machine.SPI9.Configure(machine.SPIConfig{
+	// 	// teensy41
+	// 	// Frequency: 0,
+	// 	// SDI: machine.SPI1_SDI_PIN,
+	// 	// SDO: machine.SPI1_SDO_PIN,
+	// 	// SCK: machine.SPI1_SCK_PIN,
+	// 	// CS:  machine.SPI1_SDI_PIN,
+	// 	// matrixportal-m4
+	// 	SDI: machine.SPI9_SDI_PIN,
+	// 	SDO: machine.SPI9_SDO_PIN,
+	// 	SCK: machine.SPI9_SCK_PIN,
+	// })
+	// println("spi config")
+	// // rgb := hub75.New(machine.SPI1, machine.D3, machine.D2)
+	//
+	// sd := sdcard.New(&machine.SPI9, machine.A1, machine.A2, machine.A3, machine.A4)
+	// println("sd new")
+	// err = sd.Configure()
+	// println("sd config")
+	// if err != nil {
+	// 	buf.PrintlnInverse("sd config: " + err.Error())
+	// } else {
+	// 	buf.Println(fmt.Sprintf("sd size: %d", sd.Size()))
+	// }
 
-	machine.SPI9.Configure(machine.SPIConfig{
-		// teensy41
-		// Frequency: 0,
-		// SDI: machine.SPI1_SDI_PIN,
-		// SDO: machine.SPI1_SDO_PIN,
-		// SCK: machine.SPI1_SCK_PIN,
-		// CS:  machine.SPI1_SDI_PIN,
-		// matrixportal-m4
-		SDI: machine.SPI9_SDI_PIN,
-		SDO: machine.SPI9_SDO_PIN,
-		SCK: machine.SPI9_SCK_PIN,
-	})
-	println("spi config")
-	// rgb := hub75.New(machine.SPI1, machine.D3, machine.D2)
-
-	sd := sdcard.New(&machine.SPI9, machine.A1, machine.A2, machine.A3, machine.A4)
-	println("sd new")
-	err = sd.Configure()
-	println("sd config")
-	if err != nil {
-		buf.PrintlnInverse("sd config: " + err.Error())
-	} else {
-		buf.Println(fmt.Sprintf("sd size: %d", sd.Size()))
-	}
-
-	// prox := apds9960.New(machine.I2C0)
-	// prox.Configure(apds9960.Configuration{})
-	// prox.EnableProximity()
+	prox := apds9960.New(machine.I2C0)
+	prox.Configure(apds9960.Configuration{})
+	prox.EnableProximity()
 
 	buf.PrintlnInverse("inverse")
 	w, h := buf.Size()
@@ -81,8 +81,8 @@ func main() {
 	buf.SetLineInverse(5, "more inverse")
 
 	for {
-		time.Sleep(time.Second)
-		blink()
-		// buf.SetLine(7, fmt.Sprintf("prox: %d", prox.ReadProximity()))
+		time.Sleep(50 * time.Millisecond)
+		// blink()
+		buf.SetLine(7, fmt.Sprintf("prox: %d", prox.ReadProximity()))
 	}
 }

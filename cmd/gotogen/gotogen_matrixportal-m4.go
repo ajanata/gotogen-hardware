@@ -67,12 +67,12 @@ func main() {
 		rgb := hub75.New(hub75.Config{
 			Data:         machine.SPI9_SDO_PIN,
 			Clock:        machine.SPI9_SCK_PIN,
-			Latch:        machine.HUB75_LAT,
+			Latch:        machine.PB07,
 			OutputEnable: machine.HUB75_OE,
-			A:            machine.HUB75_ADDR_A,
-			B:            machine.HUB75_ADDR_B,
-			C:            machine.HUB75_ADDR_C,
-			D:            machine.HUB75_ADDR_D,
+			A:            machine.PB00,
+			B:            machine.PB02,
+			C:            machine.PB03,
+			D:            machine.PB05,
 			Brightness:   0x1F,
 			NumScreens:   4, // screens are 32x32 as far as this driver is concerned
 		})
