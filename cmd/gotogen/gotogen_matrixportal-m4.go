@@ -3,8 +3,10 @@
 package main
 
 import (
+	"image/color"
 	"machine"
 	"time"
+	"tinygo.org/x/drivers/ws2812"
 
 	"github.com/ajanata/gotogen"
 	"github.com/aykevl/things/hub75"
@@ -30,6 +32,11 @@ func main() {
 	blink()
 
 	g, err := gotogen.New(60, nil, &dev, machine.LED, func() (faceDisplay drivers.Displayer, menuInput gotogen.MenuInput, boopSensor gotogen.BoopSensor, err error) {
+		// turn off the NeoPixel
+		machine.NEOPIXEL.Configure(machine.PinConfig{Mode: machine.PinOutput})
+		np := ws2812.New(machine.NEOPIXEL)
+		_ = np.WriteColors([]color.RGBA{{}})
+
 		// matrixportal hub75 connector
 		// rgb := rgb75.New(
 		// 	machine.HUB75_OE, machine.HUB75_LAT, machine.HUB75_CLK,
