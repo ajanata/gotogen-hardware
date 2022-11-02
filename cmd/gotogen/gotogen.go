@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+var (
+	// TODO better way to set these. for now, create a config.go and set them in an init()
+	wifiSSID     string
+	wifiPassword string
+	tzOffset     time.Duration
+)
+
 func blink() {
 	led := machine.LED
 	led.Configure(machine.PinConfig{Mode: machine.PinOutput})
