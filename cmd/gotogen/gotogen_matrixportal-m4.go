@@ -37,6 +37,9 @@ type driver struct {
 	lastButton byte
 }
 
+var d = driver{}
+var disp ssd1306.Device
+
 func main() {
 	time.Sleep(time.Second)
 	blink()
@@ -50,14 +53,14 @@ func main() {
 	}
 	blink()
 
-	dev := ssd1306.NewI2C(machine.I2C0)
-	dev.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
+	disp = ssd1306.NewI2C(machine.I2C0)
+	disp.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
 	blink()
-	dev.ClearBuffer()
-	dev.ClearDisplay()
+	disp.ClearBuffer()
+	disp.ClearDisplay()
 	blink()
 
-	g, err := gotogen.New(60, nil, &dev, machine.LED, &driver{})
+	g, err := gotogen.New(60, nil, &disp, machine.LED, &d)
 	if err != nil {
 		earlyPanic(err)
 	}
