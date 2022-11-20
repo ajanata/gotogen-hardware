@@ -6,7 +6,9 @@ import (
 	"device/sam"
 	"image/color"
 	"machine"
+	"runtime/interrupt"
 	"time"
+	"unsafe"
 
 	"github.com/ajanata/gotogen"
 	"github.com/ajanata/textbuf"
@@ -33,12 +35,28 @@ const (
 	matrixSDI = machine.NoPin
 )
 
+const dmaDescriptors = 2
+
+//go:align 16
+var DMADescriptorSection [dmaDescriptors]DMADescriptor
+
+//go:align 16
+var DMADescriptorWritebackSection [dmaDescriptors]DMADescriptor
+
+type DMADescriptor struct {
+	Btctrl   uint16
+	Btcnt    uint16
+	Srcaddr  unsafe.Pointer
+	Dstaddr  unsafe.Pointer
+	Descaddr unsafe.Pointer
+}
+
 type driver struct {
 	lastButton byte
 }
 
 var d = driver{}
-var disp ssd1306.Device
+var disp *ssd1306.Device
 
 func main() {
 	time.Sleep(time.Second)
@@ -53,14 +71,31 @@ func main() {
 	}
 	blink()
 
-	disp = ssd1306.NewI2C(machine.I2C0)
+	// Init DMAC.
+	// First configure the clocks, then configure the DMA descriptors. Those
+	// descriptors must live in SRAM and must be aligned on a 16-byte boundary.
+	// http://www.lucadavidian.com/2018/03/08/wifi-controlled-neo-pixels-strips/
+	// https://svn.larosterna.com/oss/trunk/arduino/zerotimer/zerodma.cpp
+	sam.MCLK.AHBMASK.SetBits(sam.MCLK_AHBMASK_DMAC_)
+	sam.DMAC.BASEADDR.Set(uint32(uintptr(unsafe.Pointer(&DMADescriptorSection))))
+	sam.DMAC.WRBADDR.Set(uint32(uintptr(unsafe.Pointer(&DMADescriptorWritebackSection))))
+	// Enable peripheral with all priorities.
+	sam.DMAC.CTRL.SetBits(sam.DMAC_CTRL_DMAENABLE | sam.DMAC_CTRL_LVLEN0 | sam.DMAC_CTRL_LVLEN1 | sam.DMAC_CTRL_LVLEN2 | sam.DMAC_CTRL_LVLEN3)
+
+	disp = ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
+		DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
+		DMAChannel:    1,
+		TriggerSource: 0x0F, // SERCOM5_DMAC_ID_TX
+	})
 	disp.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
+	i2cInt := interrupt.New(sam.IRQ_DMAC_1, dispDMAInt)
+	i2cInt.SetPriority(0xC0)
+	i2cInt.Enable()
 	blink()
-	disp.ClearBuffer()
 	disp.ClearDisplay()
 	blink()
 
-	g, err := gotogen.New(60, nil, &disp, machine.LED, &d)
+	g, err := gotogen.New(60, nil, disp, machine.LED, &d)
 	if err != nil {
 		earlyPanic(err)
 	}
@@ -70,6 +105,10 @@ func main() {
 	}
 
 	g.Run()
+}
+
+func dispDMAInt(i interrupt.Interrupt) {
+	disp.TXComplete(i)
 }
 
 func (driver) EarlyInit() (faceDisplay drivers.Displayer, boopSensor gotogen.BoopSensor, err error) {
@@ -89,6 +128,15 @@ func (driver) EarlyInit() (faceDisplay drivers.Displayer, boopSensor gotogen.Boo
 	}
 
 	rgb := hub75.New(hub75.Config{
+		DeviceConfig: hub75.DeviceConfig{
+			Bus:                   &matrixSPI,
+			TriggerSource:         0x0D, // SERCOM4_DMAC_ID_TX
+			OETimerCounterControl: sam.TCC3,
+			TimerChannel:          0,
+			TimerIntenset:         sam.TCC_INTENSET_MC0,
+			DMAChannel:            0,
+			DMADescriptor:         (*hub75.DmaDescriptor)(&DMADescriptorSection[0]),
+		},
 		Data:         matrixSDO,
 		Clock:        matrixSCK,
 		Latch:        machine.HUB75_LAT,
@@ -100,6 +148,12 @@ func (driver) EarlyInit() (faceDisplay drivers.Displayer, boopSensor gotogen.Boo
 		Brightness:   0x1F,
 		NumScreens:   4, // screens are 32x32 as far as this driver is concerned
 	})
+	spiInt := interrupt.New(sam.IRQ_SERCOM4_1, hub75.SPIHandler)
+	spiInt.SetPriority(0xC0)
+	spiInt.Enable()
+	timerInt := interrupt.New(sam.IRQ_TCC3_MC0, hub75.TimerHandler)
+	timerInt.SetPriority(0xC0)
+	timerInt.Enable()
 
 	// configure buttons
 	machine.BUTTON_UP.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
