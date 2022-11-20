@@ -95,7 +95,7 @@ func main() {
 	disp.ClearDisplay()
 	blink()
 
-	g, err := gotogen.New(60, nil, disp, machine.LED, &d)
+	g, err := gotogen.New(60, disp, machine.LED, &d)
 	if err != nil {
 		earlyPanic(err)
 	}
