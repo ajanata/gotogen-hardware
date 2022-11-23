@@ -158,6 +158,8 @@ func (driver) EarlyInit() (faceDisplay drivers.Displayer, boopSensor gotogen.Boo
 	// configure buttons
 	machine.BUTTON_UP.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
 	machine.BUTTON_DOWN.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	machine.A1.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	machine.A2.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
 
 	return rgb, nil, nil
 }
@@ -180,10 +182,18 @@ func (d *driver) PressedButton() gotogen.MenuButton {
 	if !machine.BUTTON_DOWN.Get() {
 		cur |= 1 << gotogen.MenuButtonDown
 	}
+	if !machine.A1.Get() {
+		cur |= 1 << gotogen.MenuButtonBack
+	}
+	if !machine.A2.Get() {
+		cur |= 1 << gotogen.MenuButtonMenu
+	}
+
 	if cur == d.lastButton {
 		// TODO key repeat
 		return gotogen.MenuButtonNone
 	}
+
 	d.lastButton = cur
 	// some button has changed
 	if cur&(1<<gotogen.MenuButtonUp) > 0 {
@@ -191,6 +201,12 @@ func (d *driver) PressedButton() gotogen.MenuButton {
 	}
 	if cur&(1<<gotogen.MenuButtonDown) > 0 {
 		return gotogen.MenuButtonDown
+	}
+	if cur&(1<<gotogen.MenuButtonBack) > 0 {
+		return gotogen.MenuButtonBack
+	}
+	if cur&(1<<gotogen.MenuButtonMenu) > 0 {
+		return gotogen.MenuButtonMenu
 	}
 
 	// guess they let go of all the buttons
