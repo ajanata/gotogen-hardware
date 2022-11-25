@@ -6,8 +6,12 @@ import (
 	"device/sam"
 	"image/color"
 	"machine"
+	"runtime"
 	"runtime/interrupt"
 	"time"
+	"tinygo.org/x/drivers/apds9960"
+	"tinygo.org/x/drivers/lis3dh"
+	"tinygo.org/x/drivers/pcf8523"
 	"unsafe"
 
 	"github.com/ajanata/gotogen"
@@ -18,6 +22,13 @@ import (
 	"tinygo.org/x/drivers/ws2812"
 
 	"github.com/ajanata/gotogen-hardware/internal/ntp"
+)
+
+const (
+	up   = machine.BUTTON_UP
+	down = machine.BUTTON_DOWN
+	back = machine.A1
+	menu = machine.A2
 )
 
 const ntpHost = "time.nist.gov"
@@ -52,11 +63,17 @@ type DMADescriptor struct {
 }
 
 type driver struct {
+	g *gotogen.Gotogen
+
 	lastButton byte
+	menuDisp   *ssd1306.Device
+	faceDisp   *hub75.Device
+	rtc        pcf8523.Device
+	prox       *apds9960.Device
+	accel      *lis3dh.Device
 }
 
 var d = driver{}
-var disp *ssd1306.Device
 
 func main() {
 	time.Sleep(time.Second)
@@ -64,7 +81,9 @@ func main() {
 	err := machine.I2C0.Configure(machine.I2CConfig{
 		SCL:       machine.I2C0_SCL_PIN,
 		SDA:       machine.I2C0_SDA_PIN,
-		Frequency: 3.6 * machine.MHz,
+		Frequency: machine.MHz,
+		// display can go this fast, but the RTC can't...
+		// Frequency: 3.6 * machine.MHz,
 	})
 	if err != nil {
 		earlyPanic(err)
@@ -82,20 +101,20 @@ func main() {
 	// Enable peripheral with all priorities.
 	sam.DMAC.CTRL.SetBits(sam.DMAC_CTRL_DMAENABLE | sam.DMAC_CTRL_LVLEN0 | sam.DMAC_CTRL_LVLEN1 | sam.DMAC_CTRL_LVLEN2 | sam.DMAC_CTRL_LVLEN3)
 
-	disp = ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
+	d.menuDisp = ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
 		DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
 		DMAChannel:    1,
 		TriggerSource: 0x0F, // SERCOM5_DMAC_ID_TX
 	})
-	disp.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
+	d.menuDisp.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
 	i2cInt := interrupt.New(sam.IRQ_DMAC_1, dispDMAInt)
 	i2cInt.SetPriority(0xC0)
 	i2cInt.Enable()
 	blink()
-	disp.ClearDisplay()
+	d.menuDisp.ClearDisplay()
 	blink()
 
-	g, err := gotogen.New(60, disp, machine.LED, &d)
+	g, err := gotogen.New(60, d.menuDisp, machine.LED, &d)
 	if err != nil {
 		earlyPanic(err)
 	}
@@ -104,14 +123,15 @@ func main() {
 		earlyPanic(err)
 	}
 
-	g.Run()
+	d.g = g
+	d.g.Run()
 }
 
 func dispDMAInt(i interrupt.Interrupt) {
-	disp.TXComplete(i)
+	d.menuDisp.TXComplete(i)
 }
 
-func (driver) EarlyInit() (faceDisplay drivers.Displayer, boopSensor gotogen.BoopSensor, err error) {
+func (*driver) EarlyInit() (faceDisplay drivers.Displayer, err error) {
 	// turn off the NeoPixel
 	machine.NEOPIXEL.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	np := ws2812.New(machine.NEOPIXEL)
@@ -124,10 +144,10 @@ func (driver) EarlyInit() (faceDisplay drivers.Displayer, boopSensor gotogen.Boo
 		Frequency: 12 * machine.MHz,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	rgb := hub75.New(hub75.Config{
+	d.faceDisp = hub75.New(hub75.Config{
 		DeviceConfig: hub75.DeviceConfig{
 			Bus:                   &matrixSPI,
 			TriggerSource:         0x0D, // SERCOM4_DMAC_ID_TX
@@ -145,7 +165,7 @@ func (driver) EarlyInit() (faceDisplay drivers.Displayer, boopSensor gotogen.Boo
 		B:            machine.PB02,
 		C:            machine.PB03,
 		D:            machine.PB05,
-		Brightness:   0x1F,
+		Brightness:   0x20,
 		NumScreens:   4, // screens are 32x32 as far as this driver is concerned
 	})
 	spiInt := interrupt.New(sam.IRQ_SERCOM4_1, hub75.SPIHandler)
@@ -156,36 +176,107 @@ func (driver) EarlyInit() (faceDisplay drivers.Displayer, boopSensor gotogen.Boo
 	timerInt.Enable()
 
 	// configure buttons
-	machine.BUTTON_UP.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
-	machine.BUTTON_DOWN.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
-	machine.A1.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
-	machine.A2.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	up.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	down.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	back.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	menu.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
 
-	return rgb, nil, nil
+	return d.faceDisp, nil
 }
 
-func (driver) LateInit(buf *textbuf.Buffer) error {
-	err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, tzOffset, buf)
-	if err != nil {
-		return err
+func (*driver) LateInit(buf *textbuf.Buffer) error {
+	_ = buf.Print("Reading RTC")
+	// ensure no active I2C DMA transfers for the display
+	for d.menuDisp.Busy() {
+		time.Sleep(time.Millisecond)
 	}
+	d.rtc = pcf8523.New(machine.I2C0)
+	rtcGood := false
+	lost, err := d.rtc.LostPower()
+	if err != nil {
+		_ = buf.PrintlnInverse(": " + err.Error())
+		_ = buf.Println("Skipping RTC")
+	} else {
+		init, err := d.rtc.Initialized()
+		if err != nil {
+			_ = buf.PrintlnInverse(": " + err.Error())
+			_ = buf.Println("Skipping RTC")
+		} else {
+			if init && !lost {
+				now, err := d.rtc.Now()
+				if err != nil {
+					_ = buf.PrintlnInverse(": " + err.Error())
+					_ = buf.Println("Skipping RTC")
+				} else {
+					rtcGood = true
+					runtime.AdjustTimeOffset(-1*int64(time.Since(now)) + int64(tzOffset))
+					_ = buf.Println(".")
+				}
+			} else {
+				_ = buf.PrintlnInverse(": RTC lost power or not set, ignoring")
+			}
+		}
+	}
+
+	if !rtcGood {
+		err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, tzOffset, buf)
+		if err != nil {
+			return err
+		}
+	}
+
+	_ = buf.Print("Proximity")
+	// ensure no active I2C DMA transfers for the display
+	for d.menuDisp.Busy() {
+		time.Sleep(time.Millisecond)
+	}
+	prox := apds9960.New(machine.I2C0)
+	d.prox = &prox
+	d.prox.Configure(apds9960.Configuration{})
+	// the example I have returns 0xA8 for the device ID, not 0xAB, so the driver thinks it isn't there.
+	// but it does actually work, so I guess just always assume it's there
+	// if d.prox.Connected() && d.prox.ProximityAvailable() {
+	d.prox.EnableProximity()
+	_ = buf.Println(".")
+	// } else {
+	// 	_ = buf.PrintlnInverse(": unavailable")
+	// 	d.prox = nil
+	// }
+
+	_ = buf.Print("Accelerometer")
+	// ensure no active I2C DMA transfers for the display
+	for d.menuDisp.Busy() {
+		time.Sleep(time.Millisecond)
+	}
+	accel := lis3dh.New(machine.I2C0)
+	d.accel = &accel
+	d.accel.Address = 0x19
+	d.accel.Configure()
+	if d.accel.Connected() {
+		// hopefully this saves power?
+		d.accel.SetDataRate(lis3dh.DATARATE_50_HZ)
+		_ = buf.Println(".")
+	} else {
+		_ = buf.PrintlnInverse(": unavailable")
+		d.accel = nil
+	}
+
 	return nil
 }
 
 func (d *driver) PressedButton() gotogen.MenuButton {
-	// TODO figure out more buttons
 	cur := byte(0)
 	// buttons use pull-up resistors and short to ground, so they are *false* when pressed
-	if !machine.BUTTON_UP.Get() {
+	if !up.Get() {
 		cur |= 1 << gotogen.MenuButtonUp
 	}
-	if !machine.BUTTON_DOWN.Get() {
+	if !down.Get() {
 		cur |= 1 << gotogen.MenuButtonDown
 	}
-	if !machine.A1.Get() {
+	if !back.Get() {
 		cur |= 1 << gotogen.MenuButtonBack
 	}
-	if !machine.A2.Get() {
+	if !menu.Get() {
 		cur |= 1 << gotogen.MenuButtonMenu
 	}
 
@@ -211,4 +302,67 @@ func (d *driver) PressedButton() gotogen.MenuButton {
 
 	// guess they let go of all the buttons
 	return gotogen.MenuButtonNone
+}
+
+func (d *driver) BoopDistance() (uint8, gotogen.SensorStatus) {
+	if d.prox == nil {
+		return 0, gotogen.SensorStatusUnavailable
+	}
+	if d.menuDisp.Busy() {
+		return 0, gotogen.SensorStatusBusy
+	}
+	// TODO normalize
+	return uint8(d.prox.ReadProximity()), gotogen.SensorStatusAvailable
+}
+
+func (d *driver) Accelerometer() (int32, int32, int32, gotogen.SensorStatus) {
+	if d.accel == nil {
+		return 0, 0, 0, gotogen.SensorStatusUnavailable
+	}
+	if d.menuDisp.Busy() {
+		return 0, 0, 0, gotogen.SensorStatusBusy
+	}
+	// TODO normalize and zero out gravity
+	// this never returns an error...
+	x, y, z, _ := d.accel.ReadAcceleration()
+	return x, y, z, gotogen.SensorStatusAvailable
+}
+
+func (d *driver) MenuItems() []gotogen.Item {
+	m := []gotogen.Item{
+		&gotogen.ActionItem{
+			Name:   "Set time from NTP",
+			Invoke: d.setTime,
+		},
+		&gotogen.SettingItem{
+			Name:    "Brightness",
+			Options: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"},
+			Active:  uint8(d.faceDisp.Brightness() >> 3),
+			Default: 4,
+			Apply:   d.setBrightness,
+		},
+	}
+	return m
+}
+
+func (d *driver) setTime() {
+	d.g.Busy(func(buf *textbuf.Buffer) {
+		buf.AutoFlush = true
+		err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, tzOffset, buf)
+		if err != nil {
+			_ = buf.PrintlnInverse("ntp: " + err.Error())
+		} else {
+			_ = buf.Println(time.Now().Format(time.Stamp))
+			_ = buf.Print("Setting RTC")
+			err := d.rtc.Set(time.Now())
+			if err != nil {
+				_ = buf.PrintlnInverse("rtc: " + err.Error())
+			}
+			_ = buf.Println(".")
+		}
+	})
+}
+
+func (d *driver) setBrightness(s uint8) {
+	d.faceDisp.SetBrightness(uint32(s) << 3)
 }

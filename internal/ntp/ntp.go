@@ -14,6 +14,7 @@ import (
 const ntpPacketSize = 48
 
 var b = make([]byte, ntpPacketSize)
+var wifi *wifinina.Device
 
 // NTP connects to the given Wi-Fi network and sends an NTP request to the given host. If no errors occur, and a
 // response is received, the time offset is adjusted so that the current time returned by time.Now() is approximately
@@ -24,27 +25,28 @@ var b = make([]byte, ntpPacketSize)
 // based on https://github.com/tinygo-org/drivers/blob/release/examples/wifinina/ntpclient/main.go
 func NTP(ntpHost, wifiSSID, wifiPassword string, tzOffset time.Duration, buf *textbuf.Buffer) error {
 	_ = buf.Print("Wifi: init")
+	if wifi == nil {
+		err := machine.NINA_SPI.Configure(machine.SPIConfig{
+			Frequency: 8 * machine.MHz,
+			SDO:       machine.NINA_SDO,
+			SDI:       machine.NINA_SDI,
+			SCK:       machine.NINA_SCK,
+		})
+		if err != nil {
+			return err
+		}
 
-	err := machine.NINA_SPI.Configure(machine.SPIConfig{
-		Frequency: 8 * machine.MHz,
-		SDO:       machine.NINA_SDO,
-		SDI:       machine.NINA_SDI,
-		SCK:       machine.NINA_SCK,
-	})
-	if err != nil {
-		return err
+		wifi = wifinina.New(machine.NINA_SPI,
+			machine.NINA_CS,
+			machine.NINA_ACK,
+			machine.NINA_GPIO0,
+			machine.NINA_RESETN)
+		wifi.Configure()
+		time.Sleep(1 * time.Second)
 	}
 
-	wifi := wifinina.New(machine.NINA_SPI,
-		machine.NINA_CS,
-		machine.NINA_ACK,
-		machine.NINA_GPIO0,
-		machine.NINA_RESETN)
-	wifi.Configure()
-	time.Sleep(1 * time.Second)
-
 	_ = buf.Println(".\nConnect: " + wifiSSID)
-	err = wifi.ConnectToAccessPoint(wifiSSID, wifiPassword, 10*time.Second)
+	err := wifi.ConnectToAccessPoint(wifiSSID, wifiPassword, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -87,9 +89,7 @@ func getCurrentTime(conn *net.UDPSerialConn) (time.Time, error) {
 		} else if n == 0 {
 			continue // no packet received yet
 		} else if n != ntpPacketSize {
-			if n != ntpPacketSize {
-				return time.Time{}, fmt.Errorf("expected NTP packet size of %d: %d", ntpPacketSize, n)
-			}
+			return time.Time{}, fmt.Errorf("expected NTP packet size of %d: %d", ntpPacketSize, n)
 		}
 		return parseNTPpacket(), nil
 	}

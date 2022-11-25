@@ -29,4 +29,6 @@ require (
 require (
 	github.com/ajanata/oled_font v1.2.0 // indirect
 	golang.org/x/image v0.0.0-20210628002857-a66eb6448b8d // indirect
+	golang.org/x/net v0.0.0-20210614182718-04defd469f4e // indirect
+	golang.org/x/text v0.3.6 // indirect
 )
