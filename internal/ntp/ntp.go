@@ -23,7 +23,7 @@ var wifi *wifinina.Device
 // TODO: pass in the Nina coprocessor device so we don't have to rely on the machine package providing it?
 //
 // based on https://github.com/tinygo-org/drivers/blob/release/examples/wifinina/ntpclient/main.go
-func NTP(ntpHost, wifiSSID, wifiPassword string, tzOffset time.Duration, buf *textbuf.Buffer) error {
+func NTP(ntpHost, wifiSSID, wifiPassword string, buf *textbuf.Buffer) error {
 	_ = buf.Print("Wifi: init")
 	if wifi == nil {
 		err := machine.NINA_SPI.Configure(machine.SPIConfig{
@@ -71,7 +71,7 @@ func NTP(ntpHost, wifiSSID, wifiPassword string, tzOffset time.Duration, buf *te
 	if err != nil {
 		return err
 	}
-	runtime.AdjustTimeOffset(-1*int64(time.Since(t)) + int64(tzOffset))
+	runtime.AdjustTimeOffset(-1 * int64(time.Since(t)))
 	_ = buf.Println(".")
 
 	return nil

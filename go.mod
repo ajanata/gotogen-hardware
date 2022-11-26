@@ -24,6 +24,7 @@ require (
 	github.com/ajanata/textbuf v0.0.2
 	github.com/aykevl/things v0.0.0-20221017191438-a010d20916fe
 	tinygo.org/x/drivers v0.23.0
+	tinygo.org/x/tinyfs v0.2.0
 )
 
 require (

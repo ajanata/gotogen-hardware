@@ -8,10 +8,14 @@ import (
 	"machine"
 	"runtime"
 	"runtime/interrupt"
+	"strconv"
 	"time"
 	"tinygo.org/x/drivers/apds9960"
+	"tinygo.org/x/drivers/flash"
 	"tinygo.org/x/drivers/lis3dh"
 	"tinygo.org/x/drivers/pcf8523"
+	"tinygo.org/x/tinyfs"
+	"tinygo.org/x/tinyfs/littlefs"
 	"unsafe"
 
 	"github.com/ajanata/gotogen"
@@ -71,11 +75,14 @@ type driver struct {
 	rtc        pcf8523.Device
 	prox       *apds9960.Device
 	accel      *lis3dh.Device
+	fl         *flash.Device
+	fs         tinyfs.Filesystem
 }
 
 var d = driver{}
 
 func main() {
+	time.Local = time.FixedZone("local", int(tzOffset.Seconds()))
 	time.Sleep(time.Second)
 	blink()
 	err := machine.I2C0.Configure(machine.I2CConfig{
@@ -114,7 +121,7 @@ func main() {
 	d.menuDisp.ClearDisplay()
 	blink()
 
-	g, err := gotogen.New(60, d.menuDisp, machine.LED, &d)
+	g, err := gotogen.New(120, d.menuDisp, machine.LED, &d)
 	if err != nil {
 		earlyPanic(err)
 	}
@@ -131,7 +138,14 @@ func dispDMAInt(i interrupt.Interrupt) {
 	d.menuDisp.TXComplete(i)
 }
 
-func (*driver) EarlyInit() (faceDisplay drivers.Displayer, err error) {
+func (d *driver) waitForDMA() {
+	// ensure no active I2C DMA transfers for the display
+	for d.menuDisp.Busy() {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func (d *driver) EarlyInit() (faceDisplay drivers.Displayer, err error) {
 	// turn off the NeoPixel
 	machine.NEOPIXEL.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	np := ws2812.New(machine.NEOPIXEL)
@@ -144,6 +158,7 @@ func (*driver) EarlyInit() (faceDisplay drivers.Displayer, err error) {
 		Frequency: 12 * machine.MHz,
 	})
 	if err != nil {
+		println("spi config", err)
 		return nil, err
 	}
 
@@ -184,52 +199,63 @@ func (*driver) EarlyInit() (faceDisplay drivers.Displayer, err error) {
 	return d.faceDisp, nil
 }
 
-func (*driver) LateInit(buf *textbuf.Buffer) error {
+func (*driver) LateInit(buf *textbuf.Buffer) {
 	_ = buf.Print("Reading RTC")
-	// ensure no active I2C DMA transfers for the display
-	for d.menuDisp.Busy() {
-		time.Sleep(time.Millisecond)
-	}
+	d.waitForDMA()
 	d.rtc = pcf8523.New(machine.I2C0)
 	rtcGood := false
 	lost, err := d.rtc.LostPower()
 	if err != nil {
+		println("rtc lost power check:", err)
 		_ = buf.PrintlnInverse(": " + err.Error())
 		_ = buf.Println("Skipping RTC")
 	} else {
 		init, err := d.rtc.Initialized()
 		if err != nil {
+			println("rtc initialized check:", err)
 			_ = buf.PrintlnInverse(": " + err.Error())
 			_ = buf.Println("Skipping RTC")
 		} else {
 			if init && !lost {
 				now, err := d.rtc.Now()
 				if err != nil {
+					println("rtc read:", err)
 					_ = buf.PrintlnInverse(": " + err.Error())
 					_ = buf.Println("Skipping RTC")
 				} else {
-					rtcGood = true
-					runtime.AdjustTimeOffset(-1*int64(time.Since(now)) + int64(tzOffset))
-					_ = buf.Println(".")
+					runtime.AdjustTimeOffset(-1 * int64(time.Since(now)))
+					if now.Year() > 2050 || now.Year() < 2022 {
+						_ = buf.PrintlnInverse(": bogus")
+						println("rtc bogus: ", now.String())
+					} else {
+						_ = buf.Println(".")
+						println("using rtc")
+						rtcGood = true
+					}
 				}
 			} else {
+				println("not using rtc")
 				_ = buf.PrintlnInverse(": RTC lost power or not set, ignoring")
 			}
 		}
 	}
 
 	if !rtcGood {
-		err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, tzOffset, buf)
+		err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, buf)
 		if err != nil {
-			return err
+			println("ntp:", err)
+		} else {
+			println(time.Now().String())
+			d.waitForDMA()
+			err := d.rtc.Set(time.Now().In(time.UTC))
+			if err != nil {
+				println("setting rtc:", err)
+			}
 		}
 	}
 
 	_ = buf.Print("Proximity")
-	// ensure no active I2C DMA transfers for the display
-	for d.menuDisp.Busy() {
-		time.Sleep(time.Millisecond)
-	}
+	d.waitForDMA()
 	prox := apds9960.New(machine.I2C0)
 	d.prox = &prox
 	d.prox.Configure(apds9960.Configuration{})
@@ -244,10 +270,7 @@ func (*driver) LateInit(buf *textbuf.Buffer) error {
 	// }
 
 	_ = buf.Print("Accelerometer")
-	// ensure no active I2C DMA transfers for the display
-	for d.menuDisp.Busy() {
-		time.Sleep(time.Millisecond)
-	}
+	d.waitForDMA()
 	accel := lis3dh.New(machine.I2C0)
 	d.accel = &accel
 	d.accel.Address = 0x19
@@ -257,11 +280,45 @@ func (*driver) LateInit(buf *textbuf.Buffer) error {
 		d.accel.SetDataRate(lis3dh.DATARATE_50_HZ)
 		_ = buf.Println(".")
 	} else {
+		println("accelerometer:", err)
 		_ = buf.PrintlnInverse(": unavailable")
 		d.accel = nil
 	}
 
-	return nil
+	_ = buf.Print("Flash")
+	f := flash.NewQSPI(machine.D42, machine.D41, machine.D43, machine.D44, machine.D45, machine.D46)
+	// TODO we know we're only going to have a GD25Q16 so make a device identifier specifically for that for code size
+	err = f.Configure(&flash.DeviceConfig{Identifier: flash.DefaultDeviceIdentifier})
+	if err != nil {
+		println("flash:", err)
+		_ = buf.PrintlnInverse(": " + err.Error())
+	} else {
+		d.fl = f
+		s := f.Size()
+		_ = buf.Println(": " + strconv.FormatInt(s>>10, 10) + "KiB")
+		_ = buf.Print("Filesystem")
+		fs := littlefs.New(f)
+		// copied these values from the example, may need tuning
+		fs.Configure(&littlefs.Config{
+			CacheSize:     512,
+			LookaheadSize: 512,
+			BlockCycles:   100,
+		})
+		err := fs.Mount()
+		if err != nil {
+			println("mount fs:", err)
+			_ = buf.PrintlnInverse(": " + err.Error())
+		} else {
+			s, err := fs.Size()
+			if err != nil {
+				println("getting fs size:", err)
+				_ = buf.PrintlnInverse(": " + err.Error())
+			} else {
+				d.fs = fs
+				_ = buf.Println(": " + strconv.Itoa(s))
+			}
+		}
+	}
 }
 
 func (d *driver) PressedButton() gotogen.MenuButton {
@@ -329,11 +386,12 @@ func (d *driver) Accelerometer() (int32, int32, int32, gotogen.SensorStatus) {
 }
 
 func (d *driver) MenuItems() []gotogen.Item {
+	formatLabel := "Yes (not formatted)"
+	if d.fs != nil {
+		formatLabel = "Yes (WILL ERASE)"
+	}
+
 	m := []gotogen.Item{
-		&gotogen.ActionItem{
-			Name:   "Set time from NTP",
-			Invoke: d.setTime,
-		},
 		&gotogen.SettingItem{
 			Name:    "Brightness",
 			Options: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"},
@@ -341,20 +399,39 @@ func (d *driver) MenuItems() []gotogen.Item {
 			Default: 4,
 			Apply:   d.setBrightness,
 		},
+		&gotogen.ActionItem{
+			Name:   "Set time from NTP",
+			Invoke: d.setTime,
+		},
+		&gotogen.Menu{
+			Name: "Format flash",
+			Items: []gotogen.Item{
+				&gotogen.ActionItem{
+					Name:   "No",
+					Invoke: func() {},
+				},
+				&gotogen.ActionItem{
+					Name:   formatLabel,
+					Invoke: d.formatFlash,
+				},
+			},
+		},
 	}
+
 	return m
 }
 
 func (d *driver) setTime() {
 	d.g.Busy(func(buf *textbuf.Buffer) {
 		buf.AutoFlush = true
-		err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, tzOffset, buf)
+		err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, buf)
 		if err != nil {
 			_ = buf.PrintlnInverse("ntp: " + err.Error())
 		} else {
 			_ = buf.Println(time.Now().Format(time.Stamp))
 			_ = buf.Print("Setting RTC")
-			err := d.rtc.Set(time.Now())
+			d.waitForDMA()
+			err := d.rtc.Set(time.Now().In(time.UTC))
 			if err != nil {
 				_ = buf.PrintlnInverse("rtc: " + err.Error())
 			}
@@ -365,4 +442,62 @@ func (d *driver) setTime() {
 
 func (d *driver) setBrightness(s uint8) {
 	d.faceDisp.SetBrightness(uint32(s) << 3)
+}
+
+func (d *driver) formatFlash() {
+	d.g.Busy(func(buf *textbuf.Buffer) {
+		if d.fl == nil {
+			_ = buf.PrintlnInverse("Flash chip failed initialization, reboot to try again.")
+			return
+		}
+		if d.fs != nil {
+			_ = buf.PrintlnInverse("ALREADY MOUNTED: will erase existing data. You have 5 seconds to abort.")
+			time.Sleep(5 * time.Second)
+			_ = buf.Print("Unmounting")
+			err := d.fs.Unmount()
+			if err != nil {
+				_ = buf.PrintlnInverse(": " + err.Error())
+				// try to continue anyway
+			} else {
+				_ = buf.Println(".")
+			}
+			d.fs = nil
+		}
+		_ = buf.Print("Erasing flash")
+		err := d.fl.EraseAll()
+		if err != nil {
+			_ = buf.PrintlnInverse(": " + err.Error())
+			return
+		}
+
+		_ = buf.Print(".\nFormatting")
+		fs := littlefs.New(d.fl)
+		// copied these values from the example, may need tuning
+		fs.Configure(&littlefs.Config{
+			CacheSize:     512,
+			LookaheadSize: 512,
+			BlockCycles:   100,
+		})
+		err = fs.Format()
+		if err != nil {
+			_ = buf.PrintlnInverse(": " + err.Error())
+			return
+		}
+
+		_ = buf.Print(".\nMounting")
+		err = fs.Mount()
+		if err != nil {
+			_ = buf.PrintlnInverse(": " + err.Error())
+			return
+		}
+
+		_ = buf.Print(".\nSize: ")
+		size, err := fs.Size()
+		if err != nil {
+			_ = buf.PrintlnInverse(err.Error())
+			return
+		}
+		_ = buf.Println(strconv.Itoa(size))
+		d.fs = fs
+	})
 }
