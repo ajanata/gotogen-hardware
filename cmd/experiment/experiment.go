@@ -2,13 +2,18 @@ package main
 
 import (
 	"fmt"
-	"github.com/ajanata/textbuf"
 	"machine"
+	"runtime"
 	"runtime/interrupt"
+	"strconv"
 	"time"
+
+	"github.com/ajanata/textbuf"
 	"tinygo.org/x/drivers/apds9960"
 	"tinygo.org/x/drivers/lis3dh"
 	"tinygo.org/x/drivers/ssd1306"
+
+	"github.com/ajanata/gotogen-hardware/internal/mic"
 )
 
 const dmaDescriptors = 2
@@ -91,32 +96,6 @@ func main() {
 	buf.AutoFlush = true
 	buf.Println("playground boot")
 	println("boot")
-	//
-	// machine.SPI9.Configure(machine.SPIConfig{
-	// 	// teensy41
-	// 	// Frequency: 0,
-	// 	// SDI: machine.SPI1_SDI_PIN,
-	// 	// SDO: machine.SPI1_SDO_PIN,
-	// 	// SCK: machine.SPI1_SCK_PIN,
-	// 	// CS:  machine.SPI1_SDI_PIN,
-	// 	// matrixportal-m4
-	// 	SDI: machine.SPI9_SDI_PIN,
-	// 	SDO: machine.SPI9_SDO_PIN,
-	// 	SCK: machine.SPI9_SCK_PIN,
-	// })
-	// println("spi config")
-	// // rgb := hub75.New(machine.SPI1, machine.D3, machine.D2)
-	//
-	// sd := sdcard.New(&machine.SPI9, machine.A1, machine.A2, machine.A3, machine.A4)
-	// println("sd new")
-	// err = sd.Configure()
-	// println("sd config")
-	// if err != nil {
-	// 	buf.PrintlnInverse("sd config: " + err.Error())
-	// } else {
-	// 	buf.Println(fmt.Sprintf("sd size: %d", sd.Size()))
-	// }
-
 	for disp.Busy() {
 	}
 
@@ -140,14 +119,40 @@ func main() {
 	buf.Println(fmt.Sprintf("w, h = %d, %d", w, h))
 	buf.SetLineInverse(5, "more inverse")
 
+	mem, mem2 := runtime.MemStats{}, runtime.MemStats{}
+	runtime.ReadMemStats(&mem)
+	buf.SetLine(0, time.Now().Format("03:04"), " ", strconv.Itoa(60), "Hz ", strconv.Itoa(int(mem.HeapIdle/1024)), "k/", "178", "k")
+	runtime.ReadMemStats(&mem2)
+	println("line 0", mem.HeapIdle-mem2.HeapIdle)
+	mem = mem2
+	buf.SetLine(1, time.Now().Format("03:04")+" "+strconv.Itoa(60)+"Hz "+strconv.Itoa(int(mem.HeapIdle/1024))+"k/"+"178"+"k")
+	runtime.ReadMemStats(&mem2)
+	println("line 1", mem.HeapIdle-mem2.HeapIdle)
+	mem = mem2
+	buf.SetLine(2, fmt.Sprintf("%s %dHz %dk/%sk", time.Now().Format("03:04"), 60, mem.HeapIdle/1024, "178"))
+	runtime.ReadMemStats(&mem2)
+	println("line 2", mem.HeapIdle-mem2.HeapIdle)
+
+	machine.InitADC()
+	// adc := machine.ADC{Pin: machine.A0}
+	// adc.Configure(machine.ADCConfig{
+	// 	Reference:  0,
+	// 	Resolution: 10,
+	// 	Samples:    2,
+	// })
+	m := mic.New(machine.A0)
+
 	for {
-		time.Sleep(50 * time.Millisecond)
+		// time.Sleep(50 * time.Millisecond)
 		// blink()
 		for disp.Busy() {
 		}
-		p := prox.ReadProximity()
-		buf.SetLine(7, fmt.Sprintf("prox: %d", p))
-		println(accel.ReadAcceleration())
+		// p := prox.ReadProximity()
+		// buf.SetLine(7, fmt.Sprintf("prox: %d", p))
+		// println(accel.ReadAcceleration())
+
+		m.Update()
+		println(m.Get())
 	}
 }
 
