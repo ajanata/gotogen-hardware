@@ -10,20 +10,19 @@ import (
 	"runtime/interrupt"
 	"strconv"
 	"time"
-	"tinygo.org/x/drivers/apds9960"
-	"tinygo.org/x/drivers/flash"
-	"tinygo.org/x/drivers/lis3dh"
-	"tinygo.org/x/drivers/pcf8523"
-	"tinygo.org/x/tinyfs"
-	"tinygo.org/x/tinyfs/littlefs"
 	"unsafe"
 
 	"github.com/ajanata/gotogen"
 	"github.com/ajanata/textbuf"
 	"github.com/aykevl/things/hub75"
-	"tinygo.org/x/drivers"
+	"tinygo.org/x/drivers/apds9960"
+	"tinygo.org/x/drivers/flash"
+	"tinygo.org/x/drivers/lis3dh"
+	"tinygo.org/x/drivers/pcf8523"
 	"tinygo.org/x/drivers/ssd1306"
 	"tinygo.org/x/drivers/ws2812"
+	"tinygo.org/x/tinyfs"
+	"tinygo.org/x/tinyfs/littlefs"
 
 	"github.com/ajanata/gotogen-hardware/internal/ntp"
 )
@@ -70,8 +69,8 @@ type driver struct {
 	g *gotogen.Gotogen
 
 	lastButton byte
-	menuDisp   *ssd1306.Device
-	faceDisp   *hub75.Device
+	menuDisp   *dispWrapper
+	faceDisp   *rgbWrapper
 	rtc        pcf8523.Device
 	prox       *apds9960.Device
 	accel      *lis3dh.Device
@@ -81,10 +80,17 @@ type driver struct {
 
 var d = driver{}
 
+type dispWrapper struct {
+	*ssd1306.Device
+}
+
+type rgbWrapper struct {
+	*hub75.Device
+}
+
 func main() {
 	time.Local = time.FixedZone("local", int(tzOffset.Seconds()))
 	time.Sleep(time.Second)
-	blink()
 	err := machine.I2C0.Configure(machine.I2CConfig{
 		SCL:       machine.I2C0_SCL_PIN,
 		SDA:       machine.I2C0_SDA_PIN,
@@ -95,7 +101,6 @@ func main() {
 	if err != nil {
 		earlyPanic(err)
 	}
-	blink()
 
 	// Init DMAC.
 	// First configure the clocks, then configure the DMA descriptors. Those
@@ -108,18 +113,16 @@ func main() {
 	// Enable peripheral with all priorities.
 	sam.DMAC.CTRL.SetBits(sam.DMAC_CTRL_DMAENABLE | sam.DMAC_CTRL_LVLEN0 | sam.DMAC_CTRL_LVLEN1 | sam.DMAC_CTRL_LVLEN2 | sam.DMAC_CTRL_LVLEN3)
 
-	d.menuDisp = ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
+	d.menuDisp = &dispWrapper{Device: ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
 		DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
 		DMAChannel:    1,
 		TriggerSource: 0x0F, // SERCOM5_DMAC_ID_TX
-	})
+	})}
 	d.menuDisp.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
 	i2cInt := interrupt.New(sam.IRQ_DMAC_1, dispDMAInt)
 	i2cInt.SetPriority(0xC0)
 	i2cInt.Enable()
-	blink()
 	d.menuDisp.ClearDisplay()
-	blink()
 
 	g, err := gotogen.New(120, d.menuDisp, machine.LED, &d)
 	if err != nil {
@@ -134,6 +137,12 @@ func main() {
 	d.g.Run()
 }
 
+func (w *dispWrapper) CanUpdateNow() bool {
+	return !w.Busy()
+}
+
+func (*rgbWrapper) CanUpdateNow() bool { return true }
+
 func dispDMAInt(i interrupt.Interrupt) {
 	d.menuDisp.TXComplete(i)
 }
@@ -145,7 +154,7 @@ func (d *driver) waitForDMA() {
 	}
 }
 
-func (d *driver) EarlyInit() (faceDisplay drivers.Displayer, err error) {
+func (d *driver) EarlyInit() (faceDisplay gotogen.Display, err error) {
 	// turn off the NeoPixel
 	machine.NEOPIXEL.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	np := ws2812.New(machine.NEOPIXEL)
@@ -162,7 +171,7 @@ func (d *driver) EarlyInit() (faceDisplay drivers.Displayer, err error) {
 		return nil, err
 	}
 
-	d.faceDisp = hub75.New(hub75.Config{
+	d.faceDisp = &rgbWrapper{Device: hub75.New(hub75.Config{
 		DeviceConfig: hub75.DeviceConfig{
 			Bus:                   &matrixSPI,
 			TriggerSource:         0x0D, // SERCOM4_DMAC_ID_TX
@@ -182,7 +191,7 @@ func (d *driver) EarlyInit() (faceDisplay drivers.Displayer, err error) {
 		D:            machine.PB05,
 		Brightness:   0x20,
 		NumScreens:   4, // screens are 32x32 as far as this driver is concerned
-	})
+	})}
 	spiInt := interrupt.New(sam.IRQ_SERCOM4_1, hub75.SPIHandler)
 	spiInt.SetPriority(0xC0)
 	spiInt.Enable()
