@@ -1,8 +1,11 @@
 package main
 
 import (
+	"device/sam"
 	"fmt"
+	"image/color"
 	"machine"
+	"math"
 	"runtime"
 	"runtime/interrupt"
 	"strconv"
@@ -12,13 +15,15 @@ import (
 	"tinygo.org/x/drivers/apds9960"
 	"tinygo.org/x/drivers/lis3dh"
 	"tinygo.org/x/drivers/ssd1306"
-
-	"github.com/ajanata/gotogen-hardware/internal/mic"
+	"tinygo.org/x/drivers/ws2812"
 )
 
 const dmaDescriptors = 2
 
 var disp ssd1306.Device
+
+var last = newBuf(100)
+var adc machine.ADC
 
 // //go:align 16
 // var DMADescriptorSection [dmaDescriptors]DMADescriptor
@@ -44,6 +49,11 @@ func blink() {
 }
 
 func main() {
+	// turn off the NeoPixel
+	machine.NEOPIXEL.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	np := ws2812.New(machine.NEOPIXEL)
+	_ = np.WriteColors([]color.RGBA{{}})
+
 	time.Sleep(time.Second)
 	println("start")
 	blink()
@@ -140,20 +150,140 @@ func main() {
 	// 	Resolution: 10,
 	// 	Samples:    2,
 	// })
-	m := mic.New(machine.A0)
+	// m := mic.New(machine.A0)
+
+	adc = machine.ADC{Pin: machine.A0}
+	adc.Configure(machine.ADCConfig{
+		Resolution: 12,
+		Samples:    1,
+	})
+	// sam.ADC0.REFCTRL.SetBits(sam.ADC_REFCTRL_REFSEL_AREFB)
+	// sam.ADC0.SetCTRLB_FREERUN(1)
+
+	// last := newBuf(20)
+
+	i := interrupt.New(sam.IRQ_TC0, timerInt)
+	i.Enable()
+
+	println("config timer")
+	sam.MCLK.SetAPBAMASK_TC0_(1)
+	sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_TC0].Set(sam.GCLK_PCHCTRL_GEN_GCLK1 | 1<<sam.GCLK_PCHCTRL_CHEN_Pos)
+	for sam.GCLK.SYNCBUSY.Get() != 0 {
+	}
+
+	tc := sam.TC0_COUNT16
+	tc.SetCTRLA_ENABLE(0)
+	tc.WAVE.Set(sam.TC_COUNT16_WAVE_WAVEGEN_MFRQ)
+	for tc.SYNCBUSY.Get() != 0 {
+	}
+	// enable interrupt
+	tc.SetINTENSET_MC0(1)
+	tc.CC[0].Set(0xFFFF)
+	// one-shot, count down
+	// tc.CTRLBSET.SetBits(sam.TC_COUNT16_CTRLBSET_ONESHOT | sam.TC_COUNT16_CTRLBSET_DIR)
+	// for tc.SYNCBUSY.HasBits(sam.TC_COUNT16_SYNCBUSY_CTRLB) {
+	// }
+	startTimer()
 
 	for {
+		time.Sleep(time.Second / 60)
+		// v := adc.Get()
+		// m := last.Add(v)
+		d := last.StdDev()
+		fmt.Printf("%f\n", d)
+		// fmt.Printf("%d\t%f\t%f\n", v, m, d)
+
 		// time.Sleep(50 * time.Millisecond)
 		// blink()
-		for disp.Busy() {
-		}
+		// for disp.Busy() {
+		// }
 		// p := prox.ReadProximity()
 		// buf.SetLine(7, fmt.Sprintf("prox: %d", p))
 		// println(accel.ReadAcceleration())
 
-		m.Update()
-		println(m.Get())
+		// m.Update()
+		// println(m.Get())
 	}
+}
+
+func startTimer() {
+	println("starting timer")
+	tc := sam.TC0_COUNT16
+	// int compareValue = (int)(GCLK1_HZ / (prescaler/((float)period / 1000000))) - 1;
+	// i := 48_000_000 / (1 / (64 / 1000000.0))
+	tc.CC[0].Set(3072)
+	for tc.SYNCBUSY.HasBits(sam.TC_COUNT16_SYNCBUSY_CC0 | sam.TC_COUNT16_SYNCBUSY_CC1) {
+	}
+	// tc.CTRLBSET.Set(sam.TC_COUNT16_CTRLBSET_CMD_RETRIGGER << sam.TC_COUNT16_CTRLBSET_CMD_Pos)
+	// TC3->COUNT16.CTRLA.bit.ENABLE = 1;
+	tc.SetCTRLA_ENABLE(1)
+}
+
+func timerInt(_ interrupt.Interrupt) {
+	// println("tick")
+	v := adc.Get()
+	last.Add(v)
+	tc := sam.TC0_COUNT16
+	tc.SetINTFLAG_MC0(1)
+}
+
+type buffer struct {
+	buf  []uint16
+	mean float64
+}
+
+func newBuf(size int) *buffer {
+	return &buffer{
+		buf: make([]uint16, size),
+	}
+}
+
+// moving average only, kind of ok with sampling 32
+// func (b *buffer) Add(v uint16) float32 {
+// 	prev := float32(b.buf[0])
+// 	copy(b.buf, b.buf[1:])
+// 	b.buf[len(b.buf)-1] = v
+// 	b.mean = b.mean + (float32(v)-prev)/float32(len(b.buf))
+// 	return b.mean
+// }
+
+// standard deviation
+func (b *buffer) Add(v uint16) float64 {
+	prev := float64(b.buf[0])
+	copy(b.buf, b.buf[1:])
+	b.buf[len(b.buf)-1] = v
+	b.mean = b.mean + (float64(v)-prev)/float64(len(b.buf))
+	return b.mean
+}
+
+func (b *buffer) StdDev() float64 {
+	devSum := float64(0)
+	for _, vv := range b.buf {
+		dev := float64(vv) - b.mean
+		devSum += dev * dev
+	}
+
+	return math.Sqrt(devSum / float64(len(b.buf)))
+}
+
+func (b *buffer) Min() uint16 {
+	min := uint16(0xFFFF)
+	for _, v := range b.buf {
+		if v < min {
+			min = v
+		}
+	}
+	return min
+}
+
+func (b *buffer) Max() uint16 {
+	max := uint16(0)
+	for _, v := range b.buf {
+		if v > max {
+			max = v
+		}
+	}
+	return max
 }
 
 func dispDMAInt(i interrupt.Interrupt) {
