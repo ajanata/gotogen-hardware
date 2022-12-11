@@ -224,7 +224,7 @@ func (d *driver) EarlyInit() (faceDisplay gotogen.Display, err error) {
 		},
 		Data:         matrixSDO,
 		Clock:        matrixSCK,
-		Latch:        machine.HUB75_LAT,
+		Latch:        machine.PB06,
 		OutputEnable: machine.HUB75_OE,
 		A:            machine.PB00,
 		B:            machine.PB02,
@@ -432,7 +432,7 @@ func (d *driver) Accelerometer() (int32, int32, int32, gotogen.SensorStatus) {
 	// TODO normalize and zero out gravity
 	// this never returns an error...
 	x, y, z, _ := d.accel.ReadAcceleration()
-	return x, y, z, gotogen.SensorStatusAvailable
+	return x / 1000, y / 1000, z / 1000, gotogen.SensorStatusAvailable
 }
 
 func (d *driver) MenuItems() []gotogen.Item {
