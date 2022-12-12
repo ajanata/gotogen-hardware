@@ -49,6 +49,17 @@ const (
 	matrixSDI = machine.NoPin
 )
 
+var oledI2C = machine.I2C{
+	Bus:    sam.SERCOM1_I2CM,
+	SERCOM: 1,
+}
+
+// pins for SERCOM1
+const (
+	oledSDA = machine.PA00
+	oledSCL = machine.PA01
+)
+
 const dmaDescriptors = 2
 
 //go:align 16
@@ -95,8 +106,17 @@ func main() {
 		SCL:       machine.I2C0_SCL_PIN,
 		SDA:       machine.I2C0_SDA_PIN,
 		Frequency: machine.MHz,
-		// display can go this fast, but the RTC can't...
-		// Frequency: 3.6 * machine.MHz,
+	})
+	if err != nil {
+		earlyPanic(err)
+	}
+	println("starting early boot")
+
+	err = oledI2C.Configure(machine.I2CConfig{
+		SCL: oledSCL,
+		SDA: oledSDA,
+		// previously worked at 3.4 but now it's randomly freezing even at 1...
+		Frequency: machine.MHz,
 	})
 	if err != nil {
 		earlyPanic(err)
@@ -113,16 +133,37 @@ func main() {
 	// Enable peripheral with all priorities.
 	sam.DMAC.CTRL.SetBits(sam.DMAC_CTRL_DMAENABLE | sam.DMAC_CTRL_LVLEN0 | sam.DMAC_CTRL_LVLEN1 | sam.DMAC_CTRL_LVLEN2 | sam.DMAC_CTRL_LVLEN3)
 
-	d.menuDisp = &dispWrapper{Device: ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
+	// DMA
+	// // d.menuDisp = &dispWrapper{Device: ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
+	d.menuDisp = &dispWrapper{Device: ssd1306.NewI2CDMA(&oledI2C, &ssd1306.DMAConfig{
 		DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
 		DMAChannel:    1,
-		TriggerSource: 0x0F, // SERCOM5_DMAC_ID_TX
+		// TriggerSource: 0x0F, // SERCOM5_DMAC_ID_TX
+		TriggerSource: 0x07, // SERCOM1_DMAC_ID_TX
 	})}
+	// non-DMA
+	// disp := ssd1306.NewI2C(&oledI2C)
+	// disp := ssd1306.NewI2C(machine.I2C0)
+	// d.menuDisp = &dispWrapper{Device: &disp}
 	d.menuDisp.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
+
 	i2cInt := interrupt.New(sam.IRQ_DMAC_1, dispDMAInt)
 	i2cInt.SetPriority(0xC0)
 	i2cInt.Enable()
+
+	oledI2C.Bus.SetINTENSET_ERROR(1)
+	errInt := interrupt.New(sam.IRQ_SERCOM1_OTHER, i2cErrInt)
+	errInt.SetPriority(0xC0)
+	errInt.Enable()
+
+	machine.I2C0.Bus.SetINTENSET_ERROR(1)
+	errInt2 := interrupt.New(sam.IRQ_SERCOM5_OTHER, i2cErrInt2)
+	errInt2.SetPriority(0xC0)
+	errInt2.Enable()
+
 	d.menuDisp.ClearDisplay()
+
+	println("starting gotogen boot")
 
 	g, err := gotogen.New(120, d.menuDisp, machine.LED, &d)
 	if err != nil {
@@ -142,6 +183,18 @@ func (w *dispWrapper) CanUpdateNow() bool {
 }
 
 func (*rgbWrapper) CanUpdateNow() bool { return true }
+
+func i2cErrInt(i interrupt.Interrupt) {
+	// d.menuDisp.I2CError(i)
+	oledI2C.Bus.SetINTFLAG_ERROR(1)
+	println("i2c error", oledI2C.Bus.STATUS.Get())
+}
+
+func i2cErrInt2(i interrupt.Interrupt) {
+	// d.menuDisp.I2CError(i)
+	machine.I2C0.Bus.SetINTFLAG_ERROR(1)
+	println("i2c error main", machine.I2C0.Bus.STATUS.Get())
+}
 
 func dispDMAInt(i interrupt.Interrupt) {
 	d.menuDisp.TXComplete(i)
@@ -183,7 +236,7 @@ func (d *driver) EarlyInit() (faceDisplay gotogen.Display, err error) {
 		},
 		Data:         matrixSDO,
 		Clock:        matrixSCK,
-		Latch:        machine.HUB75_LAT,
+		Latch:        machine.PB06,
 		OutputEnable: machine.HUB75_OE,
 		A:            machine.PB00,
 		B:            machine.PB02,
@@ -391,7 +444,7 @@ func (d *driver) Accelerometer() (int32, int32, int32, gotogen.SensorStatus) {
 	// TODO normalize and zero out gravity
 	// this never returns an error...
 	x, y, z, _ := d.accel.ReadAcceleration()
-	return x, y, z, gotogen.SensorStatusAvailable
+	return x / 1000, y / 1000, z / 1000, gotogen.SensorStatusAvailable
 }
 
 func (d *driver) MenuItems() []gotogen.Item {
