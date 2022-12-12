@@ -135,25 +135,31 @@ func main() {
 
 	// DMA
 	// // d.menuDisp = &dispWrapper{Device: ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
-	// d.menuDisp = &dispWrapper{Device: ssd1306.NewI2CDMA(&oledI2C, &ssd1306.DMAConfig{
-	// 	DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
-	// 	DMAChannel:    1,
-	// 	TriggerSource: 0x0F, // SERCOM5_DMAC_ID_TX
-	// 	// TriggerSource: 0x07, // SERCOM1_DMAC_ID_TX
-	// })}
+	d.menuDisp = &dispWrapper{Device: ssd1306.NewI2CDMA(&oledI2C, &ssd1306.DMAConfig{
+		DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
+		DMAChannel:    1,
+		// TriggerSource: 0x0F, // SERCOM5_DMAC_ID_TX
+		TriggerSource: 0x07, // SERCOM1_DMAC_ID_TX
+	})}
 	// non-DMA
-	disp := ssd1306.NewI2C(&oledI2C)
-	d.menuDisp = &dispWrapper{Device: &disp}
+	// disp := ssd1306.NewI2C(&oledI2C)
+	// disp := ssd1306.NewI2C(machine.I2C0)
+	// d.menuDisp = &dispWrapper{Device: &disp}
 	d.menuDisp.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
 
-	// i2cInt := interrupt.New(sam.IRQ_DMAC_1, dispDMAInt)
-	// i2cInt.SetPriority(0xC0)
-	// i2cInt.Enable()
+	i2cInt := interrupt.New(sam.IRQ_DMAC_1, dispDMAInt)
+	i2cInt.SetPriority(0xC0)
+	i2cInt.Enable()
 
 	oledI2C.Bus.SetINTENSET_ERROR(1)
 	errInt := interrupt.New(sam.IRQ_SERCOM1_OTHER, i2cErrInt)
 	errInt.SetPriority(0xC0)
 	errInt.Enable()
+
+	machine.I2C0.Bus.SetINTENSET_ERROR(1)
+	errInt2 := interrupt.New(sam.IRQ_SERCOM5_OTHER, i2cErrInt2)
+	errInt2.SetPriority(0xC0)
+	errInt2.Enable()
 
 	d.menuDisp.ClearDisplay()
 
@@ -182,6 +188,12 @@ func i2cErrInt(i interrupt.Interrupt) {
 	// d.menuDisp.I2CError(i)
 	oledI2C.Bus.SetINTFLAG_ERROR(1)
 	println("i2c error", oledI2C.Bus.STATUS.Get())
+}
+
+func i2cErrInt2(i interrupt.Interrupt) {
+	// d.menuDisp.I2CError(i)
+	machine.I2C0.Bus.SetINTFLAG_ERROR(1)
+	println("i2c error main", machine.I2C0.Bus.STATUS.Get())
 }
 
 func dispDMAInt(i interrupt.Interrupt) {
