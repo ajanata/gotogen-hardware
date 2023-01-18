@@ -2,75 +2,97 @@ package mic
 
 import (
 	"device/sam"
-	"fmt"
 	"machine"
 	"math"
-	"time"
-
-	"github.com/ajanata/gotogen-hardware/internal/filter"
+	"runtime/interrupt"
 )
 
 type Mic struct {
-	adc       machine.ADC
-	mv        *filter.Kalman
-	minF      *filter.Min
-	out       *filter.Kalman
-	prev      float32
-	gain      float32
-	clipping  float32
-	cur       float32
-	prevTime  time.Time
-	startTime time.Time
+	adc machine.ADC
+	buf buffer
 }
 
-func New(pin machine.Pin) *Mic {
+var instance *Mic
+
+type buffer struct {
+	buf  []uint16
+	mean float32
+}
+
+// New creates a new mic driver for the specified analog pin.
+// Creating more than one Mic is not allowed.
+func New(pin machine.Pin, bufSize uint16) *Mic {
+	if instance != nil {
+		panic("cannot create more than one microphone driver")
+	}
+
 	adc := machine.ADC{Pin: pin}
 	adc.Configure(machine.ADCConfig{
-		Reference:  0,
 		Resolution: 12,
-		Samples:    32,
+		Samples:    1,
 	})
-	// sam.ADC0.REFCTRL.SetBits(sam.ADC_REFCTRL_REFSEL_AREFB)
 	sam.ADC0.SetCTRLB_FREERUN(1)
 
-	return &Mic{
-		adc:       adc,
-		mv:        filter.NewKalman(5),
-		minF:      filter.NewMin(100, true),
-		out:       filter.NewKalman(5),
-		gain:      .2,
-		clipping:  .2,
-		startTime: time.Now(),
+	m := &Mic{
+		adc: adc,
+		buf: buffer{
+			buf: make([]uint16, bufSize),
+		},
 	}
+	instance = m
+
+	i := interrupt.New(sam.IRQ_TC0, irq)
+	i.Enable()
+
+	// configure timer
+	sam.MCLK.SetAPBAMASK_TC0_(1)
+	sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_TC0].Set(sam.GCLK_PCHCTRL_GEN_GCLK1 | 1<<sam.GCLK_PCHCTRL_CHEN_Pos)
+	for sam.GCLK.SYNCBUSY.Get() != 0 {
+	}
+
+	tc := sam.TC0_COUNT16
+	tc.SetCTRLA_ENABLE(0)
+	tc.WAVE.Set(sam.TC_COUNT16_WAVE_WAVEGEN_MFRQ)
+	for tc.SYNCBUSY.Get() != 0 {
+	}
+	// enable interrupt
+	tc.SetINTENSET_MC0(1)
+	tc.CC[0].Set(0xFFFF)
+
+	// start timer
+	tc.CC[0].Set(3072)
+	for tc.SYNCBUSY.HasBits(sam.TC_COUNT16_SYNCBUSY_CC0 | sam.TC_COUNT16_SYNCBUSY_CC1) {
+	}
+	tc.SetCTRLA_ENABLE(1)
+
+	return m
 }
 
-func (m *Mic) Get() float32 {
-	return m.cur
+func (m *Mic) Value() float32 {
+	return float32(m.buf.stdDev())
 }
 
-func (m *Mic) Update() {
-	read := float32(m.adc.Get()) * m.gain
-	chg := read - m.prev
-	dT := float32(time.Now().Sub(m.prevTime).Microseconds())
-	m.prevTime = time.Now()
-	m.prev = read
-	chgRate := float64(chg / dT)
-	amp := m.mv.Filter(float32(math.Abs(chgRate)) * 10_000)
-	min := m.minF.Filter(amp)
-	norm := amp - min - 10_000
-	if norm < 0 {
-		norm = 0
-	} else if norm > 40_000 {
-		norm = 40_000
-	}
-	trunc := m.out.Filter(norm / 100 / m.clipping)
+func irq(_ interrupt.Interrupt) {
+	v := instance.adc.Get()
+	instance.buf.add(v)
+	sam.TC0_COUNT16.SetINTFLAG_MC0(1)
+}
 
-	fmt.Printf("read %12f\tamp %12f\tchg %12f\tdT %12f\tnorm %12f\tmin %12f\ttrunc %12f\n", read, amp, chg, dT, norm, min, trunc)
+func (b *buffer) add(v uint16) float32 {
+	prev := float32(b.buf[0])
+	copy(b.buf, b.buf[1:])
+	b.buf[len(b.buf)-1] = v
+	b.mean = b.mean + (float32(v)-prev)/float32(len(b.buf))
+	return b.mean
+}
 
-	if trunc < 0 {
-		trunc = 0
-	} else if trunc > 1 {
-		trunc = 1
+func (b *buffer) stdDev() float64 {
+	devSum := float64(0)
+	mean := float64(b.mean)
+	for _, vv := range b.buf {
+		dev := float64(vv) - mean
+		devSum += dev * dev
 	}
-	m.cur = trunc
+
+	return math.Sqrt(devSum / float64(len(b.buf)))
 }
