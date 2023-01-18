@@ -1,3 +1,5 @@
 .idea/
 *.elf
 cmd/gotogen/config.go
+kicad/gotogen matrixportal-backups/
+kicad/*bak

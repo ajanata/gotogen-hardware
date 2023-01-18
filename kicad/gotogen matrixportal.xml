@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<export version="E">
+  <design>
+    <source>G:\My Drive\gotogen\kicad\gotogen matrixportal\gotogen matrixportal.kicad_sch</source>
+    <date>11/30/2022 8:03:47 PM</date>
+    <tool>Eeschema (6.0.9)</tool>
+    <sheet number="1" name="/" tstamps="/">
+      <title_block>
+        <title/>
+        <company/>
+        <rev/>
+        <date/>
+        <source>gotogen matrixportal.kicad_sch</source>
+        <comment number="1" value=""/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+  </design>
+  <components>
+    <comp ref="J1">
+      <value>HUB75 Out</value>
+      <footprint>gotogen footprints:HUB75 Oversize - Socket</footprint>
+      <libsource lib="gotogen symbols" part="HUB75 Panel Input" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="gotogen matrixportal.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>a95af3fb-41ba-4b4a-a530-0368e8768783</tstamps>
+    </comp>
+    <comp ref="J2">
+      <value>HUB75 In</value>
+      <footprint>Connector_PinHeader_2.54mm:PinHeader_2x08_P2.54mm_Vertical</footprint>
+      <libsource lib="gotogen symbols" part="HUB75 Panel Output" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="gotogen matrixportal.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>fcb07924-126e-437e-b47b-ea9c69ee0122</tstamps>
+    </comp>
+    <comp ref="SW1">
+      <value>SW_Push</value>
+      <footprint>Button_Switch_THT:SW_PUSH_6mm</footprint>
+      <libsource lib="Switch" part="SW_Push" description="Push button switch, generic, two pins"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="gotogen matrixportal.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>2ec785f8-8a58-4c2a-92e6-5db794e9dabb</tstamps>
+    </comp>
+    <comp ref="SW2">
+      <value>SW_Push</value>
+      <footprint>Button_Switch_THT:SW_PUSH_6mm</footprint>
+      <libsource lib="Switch" part="SW_Push" description="Push button switch, generic, two pins"/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="gotogen matrixportal.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>523c0075-ecdc-4f38-8dd6-36cf7c46d791</tstamps>
+    </comp>
+    <comp ref="U1">
+      <value>MatrixPortal_M4</value>
+      <footprint>gotogen footprints:MatrixPortal M4</footprint>
+      <libsource lib="gotogen symbols" part="MatrixPortal_M4" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="gotogen matrixportal.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>349c3f6b-22b2-44d2-803d-60f3950e50fa</tstamps>
+    </comp>
+  </components>
+  <libparts>
+    <libpart lib="Switch" part="SW_Push">
+      <description>Push button switch, generic, two pins</description>
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">SW</field>
+        <field name="Value">SW_Push</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="1" type="passive"/>
+        <pin num="2" name="2" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="gotogen symbols" part="HUB75 Panel Input">
+      <fields>
+        <field name="Reference">J</field>
+        <field name="Value">HUB75 Panel Input</field>
+      </fields>
+      <pins>
+        <pin num="1" name="R1" type="input"/>
+        <pin num="2" name="G1" type="input"/>
+        <pin num="3" name="B1" type="input"/>
+        <pin num="4" name="GND" type="power_in"/>
+        <pin num="5" name="R2" type="input"/>
+        <pin num="6" name="G2" type="input"/>
+        <pin num="7" name="B2" type="input"/>
+        <pin num="8" name="E" type="input"/>
+        <pin num="9" name="A" type="input"/>
+        <pin num="10" name="B" type="input"/>
+        <pin num="11" name="C" type="input"/>
+        <pin num="12" name="D" type="input"/>
+        <pin num="13" name="CLK" type="input"/>
+        <pin num="14" name="LAT" type="input"/>
+        <pin num="15" name="OE" type="input"/>
+        <pin num="16" name="E" type="input"/>
+        <pin num="17" name="NC" type="no_connect"/>
+        <pin num="18" name="NC" type="no_connect"/>
+        <pin num="19" name="NC" type="no_connect"/>
+        <pin num="20" name="NC" type="no_connect"/>
+      </pins>
+    </libpart>
+    <libpart lib="gotogen symbols" part="HUB75 Panel Output">
+      <fields>
+        <field name="Reference">J</field>
+        <field name="Value">HUB75 Panel Output</field>
+      </fields>
+      <pins>
+        <pin num="1" name="R1" type="output"/>
+        <pin num="2" name="G1" type="output"/>
+        <pin num="3" name="B1" type="output"/>
+        <pin num="4" name="GND" type="power_in"/>
+        <pin num="5" name="R2" type="output"/>
+        <pin num="6" name="G2" type="output"/>
+        <pin num="7" name="B2" type="output"/>
+        <pin num="8" name="E" type="output"/>
+        <pin num="9" name="A" type="output"/>
+        <pin num="10" name="B" type="output"/>
+        <pin num="11" name="C" type="output"/>
+        <pin num="12" name="D" type="output"/>
+        <pin num="13" name="CLK" type="output"/>
+        <pin num="14" name="LAT" type="output"/>
+        <pin num="15" name="OE" type="output"/>
+        <pin num="16" name="E" type="output"/>
+      </pins>
+    </libpart>
+    <libpart lib="gotogen symbols" part="MatrixPortal_M4">
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">MatrixPortal_M4</field>
+      </fields>
+      <pins>
+        <pin num="1" name="RST" type="input"/>
+        <pin num="2" name="SWC" type="input"/>
+        <pin num="3" name="SWD" type="bidirectional"/>
+        <pin num="4" name="TX" type="bidirectional"/>
+        <pin num="5" name="RX" type="bidirectional"/>
+        <pin num="6" name="A1" type="bidirectional"/>
+        <pin num="7" name="A2" type="bidirectional"/>
+        <pin num="8" name="A3" type="bidirectional"/>
+        <pin num="9" name="A4" type="bidirectional"/>
+        <pin num="10" name="3V" type="power_out"/>
+        <pin num="11" name="GND" type="power_out"/>
+        <pin num="19" name="NC" type="no_connect"/>
+        <pin num="20" name="NC" type="no_connect"/>
+        <pin num="21" name="PB00" type="output"/>
+        <pin num="22" name="PB01" type="output"/>
+        <pin num="23" name="PB02" type="output"/>
+        <pin num="24" name="GND" type="passive"/>
+        <pin num="25" name="PB03" type="output"/>
+        <pin num="26" name="PB04" type="output"/>
+        <pin num="27" name="PB05" type="output"/>
+        <pin num="28" name="PB13" type="output"/>
+        <pin num="29" name="PB07" type="output"/>
+        <pin num="30" name="PB08" type="output"/>
+        <pin num="31" name="PB09" type="output"/>
+        <pin num="32" name="PB15" type="output"/>
+        <pin num="33" name="PB06" type="output"/>
+        <pin num="34" name="PB14" type="output"/>
+        <pin num="35" name="PB12" type="output"/>
+        <pin num="36" name="PB13" type="output"/>
+        <pin num="37" name="NC" type="no_connect"/>
+        <pin num="38" name="NC" type="no_connect"/>
+      </pins>
+    </libpart>
+  </libparts>
+  <libraries>
+    <library logical="Switch">
+      <uri>C:\Program Files\KiCad\6.0\share\kicad\symbols\/Switch.kicad_sym</uri>
+    </library>
+    <library logical="gotogen symbols">
+      <uri>G:\My Drive\gotogen\kicad\gotogen matrixportal/gotogen symbols.kicad_sym</uri>
+    </library>
+  </libraries>
+  <nets>
+    <net code="1" name="/B_BACK">
+      <node ref="SW2" pin="1" pinfunction="1" pintype="passive"/>
+      <node ref="U1" pin="6" pinfunction="A1" pintype="bidirectional"/>
+    </net>
+    <net code="2" name="/B_MENU">
+      <node ref="SW1" pin="1" pinfunction="1" pintype="passive"/>
+      <node ref="U1" pin="7" pinfunction="A2" pintype="bidirectional"/>
+    </net>
+    <net code="3" name="/LOOP_B1">
+      <node ref="J1" pin="7" pinfunction="B2" pintype="input"/>
+      <node ref="J2" pin="3" pinfunction="B1" pintype="output"/>
+    </net>
+    <net code="4" name="/LOOP_G1">
+      <node ref="J1" pin="6" pinfunction="G2" pintype="input"/>
+      <node ref="J2" pin="2" pinfunction="G1" pintype="output"/>
+    </net>
+    <net code="5" name="/LOOP_G2">
+      <node ref="J1" pin="3" pinfunction="B1" pintype="input"/>
+      <node ref="J2" pin="6" pinfunction="G2" pintype="output"/>
+    </net>
+    <net code="6" name="/LOOP_R1">
+      <node ref="J1" pin="5" pinfunction="R2" pintype="input"/>
+      <node ref="J2" pin="1" pinfunction="R1" pintype="output"/>
+    </net>
+    <net code="7" name="/LOOP_R2">
+      <node ref="J1" pin="2" pinfunction="G1" pintype="input"/>
+      <node ref="J2" pin="5" pinfunction="R2" pintype="output"/>
+    </net>
+    <net code="8" name="/M_A">
+      <node ref="J1" pin="9" pinfunction="A" pintype="input"/>
+      <node ref="U1" pin="21" pinfunction="PB00" pintype="output"/>
+    </net>
+    <net code="9" name="/M_B">
+      <node ref="J1" pin="10" pinfunction="B" pintype="input"/>
+      <node ref="U1" pin="23" pinfunction="PB02" pintype="output"/>
+    </net>
+    <net code="10" name="/M_C">
+      <node ref="J1" pin="11" pinfunction="C" pintype="input"/>
+      <node ref="U1" pin="25" pinfunction="PB03" pintype="output"/>
+    </net>
+    <net code="11" name="/M_CLK">
+      <node ref="J1" pin="13" pinfunction="CLK" pintype="input"/>
+      <node ref="U1" pin="31" pinfunction="PB09" pintype="output"/>
+    </net>
+    <net code="12" name="/M_D">
+      <node ref="J1" pin="12" pinfunction="D" pintype="input"/>
+      <node ref="U1" pin="27" pinfunction="PB05" pintype="output"/>
+    </net>
+    <net code="13" name="/M_DATA">
+      <node ref="J1" pin="1" pinfunction="R1" pintype="input"/>
+      <node ref="U1" pin="30" pinfunction="PB08" pintype="output"/>
+    </net>
+    <net code="14" name="/M_LAT">
+      <node ref="J1" pin="14" pinfunction="LAT" pintype="input"/>
+      <node ref="U1" pin="33" pinfunction="PB06" pintype="output"/>
+    </net>
+    <net code="15" name="/M_OE">
+      <node ref="J1" pin="15" pinfunction="OE" pintype="input"/>
+      <node ref="U1" pin="35" pinfunction="PB12" pintype="output"/>
+    </net>
+    <net code="16" name="GND">
+      <node ref="J1" pin="16" pinfunction="E" pintype="input"/>
+      <node ref="J1" pin="4" pinfunction="GND" pintype="power_in"/>
+      <node ref="J1" pin="8" pinfunction="E" pintype="input"/>
+      <node ref="J2" pin="4" pinfunction="GND" pintype="power_in"/>
+      <node ref="SW1" pin="2" pinfunction="2" pintype="passive"/>
+      <node ref="SW2" pin="2" pinfunction="2" pintype="passive"/>
+      <node ref="U1" pin="11" pinfunction="GND" pintype="power_out"/>
+      <node ref="U1" pin="24" pinfunction="GND" pintype="passive"/>
+    </net>
+    <net code="17" name="unconnected-(J1-Pad17)">
+      <node ref="J1" pin="17" pinfunction="NC" pintype="no_connect"/>
+    </net>
+    <net code="18" name="unconnected-(J1-Pad18)">
+      <node ref="J1" pin="18" pinfunction="NC" pintype="no_connect"/>
+    </net>
+    <net code="19" name="unconnected-(J1-Pad19)">
+      <node ref="J1" pin="19" pinfunction="NC" pintype="no_connect"/>
+    </net>
+    <net code="20" name="unconnected-(J1-Pad20)">
+      <node ref="J1" pin="20" pinfunction="NC" pintype="no_connect"/>
+    </net>
+    <net code="21" name="unconnected-(J2-Pad7)">
+      <node ref="J2" pin="7" pinfunction="B2" pintype="output+no_connect"/>
+    </net>
+    <net code="22" name="unconnected-(J2-Pad8)">
+      <node ref="J2" pin="8" pinfunction="E" pintype="output+no_connect"/>
+    </net>
+    <net code="23" name="unconnected-(J2-Pad9)">
+      <node ref="J2" pin="9" pinfunction="A" pintype="output+no_connect"/>
+    </net>
+    <net code="24" name="unconnected-(J2-Pad10)">
+      <node ref="J2" pin="10" pinfunction="B" pintype="output+no_connect"/>
+    </net>
+    <net code="25" name="unconnected-(J2-Pad11)">
+      <node ref="J2" pin="11" pinfunction="C" pintype="output+no_connect"/>
+    </net>
+    <net code="26" name="unconnected-(J2-Pad12)">
+      <node ref="J2" pin="12" pinfunction="D" pintype="output+no_connect"/>
+    </net>
+    <net code="27" name="unconnected-(J2-Pad13)">
+      <node ref="J2" pin="13" pinfunction="CLK" pintype="output+no_connect"/>
+    </net>
+    <net code="28" name="unconnected-(J2-Pad14)">
+      <node ref="J2" pin="14" pinfunction="LAT" pintype="output+no_connect"/>
+    </net>
+    <net code="29" name="unconnected-(J2-Pad15)">
+      <node ref="J2" pin="15" pinfunction="OE" pintype="output+no_connect"/>
+    </net>
+    <net code="30" name="unconnected-(J2-Pad16)">
+      <node ref="J2" pin="16" pinfunction="E" pintype="output+no_connect"/>
+    </net>
+    <net code="31" name="unconnected-(U1-Pad1)">
+      <node ref="U1" pin="1" pinfunction="RST" pintype="input+no_connect"/>
+    </net>
+    <net code="32" name="unconnected-(U1-Pad2)">
+      <node ref="U1" pin="2" pinfunction="SWC" pintype="input+no_connect"/>
+    </net>
+    <net code="33" name="unconnected-(U1-Pad3)">
+      <node ref="U1" pin="3" pinfunction="SWD" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="34" name="unconnected-(U1-Pad4)">
+      <node ref="U1" pin="4" pinfunction="TX" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="35" name="unconnected-(U1-Pad5)">
+      <node ref="U1" pin="5" pinfunction="RX" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="36" name="unconnected-(U1-Pad8)">
+      <node ref="U1" pin="8" pinfunction="A3" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="37" name="unconnected-(U1-Pad9)">
+      <node ref="U1" pin="9" pinfunction="A4" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="38" name="unconnected-(U1-Pad10)">
+      <node ref="U1" pin="10" pinfunction="3V" pintype="power_out+no_connect"/>
+    </net>
+    <net code="39" name="unconnected-(U1-Pad19)">
+      <node ref="U1" pin="19" pinfunction="NC" pintype="no_connect"/>
+    </net>
+    <net code="40" name="unconnected-(U1-Pad20)">
+      <node ref="U1" pin="20" pinfunction="NC" pintype="no_connect"/>
+    </net>
+    <net code="41" name="unconnected-(U1-Pad22)">
+      <node ref="U1" pin="22" pinfunction="PB01" pintype="output+no_connect"/>
+    </net>
+    <net code="42" name="unconnected-(U1-Pad26)">
+      <node ref="U1" pin="26" pinfunction="PB04" pintype="output+no_connect"/>
+    </net>
+    <net code="43" name="unconnected-(U1-Pad28)">
+      <node ref="U1" pin="28" pinfunction="PB13" pintype="output+no_connect"/>
+    </net>
+    <net code="44" name="unconnected-(U1-Pad29)">
+      <node ref="U1" pin="29" pinfunction="PB07" pintype="output+no_connect"/>
+    </net>
+    <net code="45" name="unconnected-(U1-Pad32)">
+      <node ref="U1" pin="32" pinfunction="PB15" pintype="output+no_connect"/>
+    </net>
+    <net code="46" name="unconnected-(U1-Pad34)">
+      <node ref="U1" pin="34" pinfunction="PB14" pintype="output+no_connect"/>
+    </net>
+    <net code="47" name="unconnected-(U1-Pad36)">
+      <node ref="U1" pin="36" pinfunction="PB13" pintype="output+no_connect"/>
+    </net>
+    <net code="48" name="unconnected-(U1-Pad37)">
+      <node ref="U1" pin="37" pinfunction="NC" pintype="no_connect"/>
+    </net>
+    <net code="49" name="unconnected-(U1-Pad38)">
+      <node ref="U1" pin="38" pinfunction="NC" pintype="no_connect"/>
+    </net>
+  </nets>
+</export>
