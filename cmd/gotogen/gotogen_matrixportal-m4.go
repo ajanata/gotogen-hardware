@@ -18,21 +18,20 @@ import (
 	"tinygo.org/x/drivers/apds9960"
 	"tinygo.org/x/drivers/flash"
 	"tinygo.org/x/drivers/lis3dh"
+	"tinygo.org/x/drivers/mpr121"
 	"tinygo.org/x/drivers/pcf8523"
+	"tinygo.org/x/drivers/pcf8574"
 	"tinygo.org/x/drivers/ssd1306"
 	"tinygo.org/x/drivers/ws2812"
 	"tinygo.org/x/tinyfs"
 	"tinygo.org/x/tinyfs/littlefs"
 
+	"github.com/ajanata/gotogen-hardware/internal/mic"
 	"github.com/ajanata/gotogen-hardware/internal/ntp"
 )
 
-const (
-	up   = machine.BUTTON_UP
-	down = machine.BUTTON_DOWN
-	back = machine.A1
-	menu = machine.A2
-)
+// const pcf8574Address = 0x20 // adafruit breakout
+const pcf8574Address = pcf8574.DefaultAddress // bare chip
 
 const ntpHost = "time.nist.gov"
 
@@ -49,15 +48,19 @@ const (
 	matrixSDI = machine.NoPin
 )
 
-var oledI2C = machine.I2C{
-	Bus:    sam.SERCOM1_I2CM,
-	SERCOM: 1,
+// and using SERCOM0 for SPI for the OLED display
+var oledSPI = machine.SPI{
+	Bus:    sam.SERCOM0_SPIM,
+	SERCOM: 0,
 }
 
-// pins for SERCOM1
+// pins for SERCOM0
 const (
-	oledSDA = machine.PA00
-	oledSCL = machine.PA01
+	oledMOSI = machine.PA04
+	oledSCK  = machine.PA05
+	oledCS   = machine.PB01
+	oledDC   = machine.PB15
+	oledRST  = machine.PB04
 )
 
 const dmaDescriptors = 2
@@ -87,9 +90,17 @@ type driver struct {
 	accel      *lis3dh.Device
 	fl         *flash.Device
 	fs         tinyfs.Filesystem
+	gpio       *pcf8574.Device
+	touch      *mpr121.Device
+
+	mic        *mic.Mic
+	talkCutoff float32
 }
 
-var d = driver{}
+var d = driver{
+	// TODO load from settings
+	talkCutoff: 3000,
+}
 
 type dispWrapper struct {
 	*ssd1306.Device
@@ -105,22 +116,19 @@ func main() {
 	err := machine.I2C0.Configure(machine.I2CConfig{
 		SCL:       machine.I2C0_SCL_PIN,
 		SDA:       machine.I2C0_SDA_PIN,
-		Frequency: machine.MHz,
+		Frequency: 400 * machine.KHz,
 	})
 	if err != nil {
 		earlyPanic(err)
 	}
 	println("starting early boot")
 
-	err = oledI2C.Configure(machine.I2CConfig{
-		SCL: oledSCL,
-		SDA: oledSDA,
-		// previously worked at 3.4 but now it's randomly freezing even at 1...
-		Frequency: machine.MHz,
+	err = oledSPI.Configure(machine.SPIConfig{
+		SCK:       oledSCK,
+		SDO:       oledMOSI,
+		SDI:       machine.NoPin,
+		Frequency: 10 * machine.MHz,
 	})
-	if err != nil {
-		earlyPanic(err)
-	}
 
 	// Init DMAC.
 	// First configure the clocks, then configure the DMA descriptors. Those
@@ -133,33 +141,14 @@ func main() {
 	// Enable peripheral with all priorities.
 	sam.DMAC.CTRL.SetBits(sam.DMAC_CTRL_DMAENABLE | sam.DMAC_CTRL_LVLEN0 | sam.DMAC_CTRL_LVLEN1 | sam.DMAC_CTRL_LVLEN2 | sam.DMAC_CTRL_LVLEN3)
 
-	// DMA
-	// // d.menuDisp = &dispWrapper{Device: ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
-	d.menuDisp = &dispWrapper{Device: ssd1306.NewI2CDMA(&oledI2C, &ssd1306.DMAConfig{
-		DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
-		DMAChannel:    1,
-		// TriggerSource: 0x0F, // SERCOM5_DMAC_ID_TX
-		TriggerSource: 0x07, // SERCOM1_DMAC_ID_TX
-	})}
-	// non-DMA
-	// disp := ssd1306.NewI2C(&oledI2C)
-	// disp := ssd1306.NewI2C(machine.I2C0)
-	// d.menuDisp = &dispWrapper{Device: &disp}
-	d.menuDisp.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
-
-	i2cInt := interrupt.New(sam.IRQ_DMAC_1, dispDMAInt)
-	i2cInt.SetPriority(0xC0)
-	i2cInt.Enable()
-
-	oledI2C.Bus.SetINTENSET_ERROR(1)
-	errInt := interrupt.New(sam.IRQ_SERCOM1_OTHER, i2cErrInt)
-	errInt.SetPriority(0xC0)
-	errInt.Enable()
-
-	machine.I2C0.Bus.SetINTENSET_ERROR(1)
-	errInt2 := interrupt.New(sam.IRQ_SERCOM5_OTHER, i2cErrInt2)
-	errInt2.SetPriority(0xC0)
-	errInt2.Enable()
+	// non-DMA SPI
+	disp := ssd1306.NewSPI(oledSPI, oledDC, oledRST, oledCS)
+	d.menuDisp = &dispWrapper{Device: &disp}
+	d.menuDisp.Configure(ssd1306.Config{
+		Width:    128,
+		Height:   64,
+		VccState: ssd1306.SWITCHCAPVCC,
+	})
 
 	d.menuDisp.ClearDisplay()
 
@@ -183,22 +172,6 @@ func (w *dispWrapper) CanUpdateNow() bool {
 }
 
 func (*rgbWrapper) CanUpdateNow() bool { return true }
-
-func i2cErrInt(i interrupt.Interrupt) {
-	// d.menuDisp.I2CError(i)
-	oledI2C.Bus.SetINTFLAG_ERROR(1)
-	println("i2c error", oledI2C.Bus.STATUS.Get())
-}
-
-func i2cErrInt2(i interrupt.Interrupt) {
-	// d.menuDisp.I2CError(i)
-	machine.I2C0.Bus.SetINTFLAG_ERROR(1)
-	println("i2c error main", machine.I2C0.Bus.STATUS.Get())
-}
-
-func dispDMAInt(i interrupt.Interrupt) {
-	d.menuDisp.TXComplete(i)
-}
 
 func (d *driver) waitForDMA() {
 	// ensure no active I2C DMA transfers for the display
@@ -253,10 +226,9 @@ func (d *driver) EarlyInit() (faceDisplay gotogen.Display, err error) {
 	timerInt.Enable()
 
 	// configure buttons
-	up.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
-	down.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
-	back.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
-	menu.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	machine.BUTTON_UP.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	machine.BUTTON_DOWN.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	// TODO configure "interrupt" for pcf8574
 
 	return d.faceDisp, nil
 }
@@ -303,6 +275,7 @@ func (*driver) LateInit(buf *textbuf.Buffer) {
 	}
 
 	if !rtcGood {
+		// TODO check a button for bypass (e.g. if known that wifi network isn't in range)
 		err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, buf)
 		if err != nil {
 			println("ntp:", err)
@@ -316,20 +289,26 @@ func (*driver) LateInit(buf *textbuf.Buffer) {
 		}
 	}
 
-	_ = buf.Print("Proximity")
-	d.waitForDMA()
-	prox := apds9960.New(machine.I2C0)
-	d.prox = &prox
-	d.prox.Configure(apds9960.Configuration{})
-	// the example I have returns 0xA8 for the device ID, not 0xAB, so the driver thinks it isn't there.
-	// but it does actually work, so I guess just always assume it's there
-	// if d.prox.Connected() && d.prox.ProximityAvailable() {
-	d.prox.EnableProximity()
-	_ = buf.Println(".")
-	// } else {
-	// 	_ = buf.PrintlnInverse(": unavailable")
-	// 	d.prox = nil
-	// }
+	// boop sensor isn't working through the visor :(
+	// _ = buf.Print("Proximity")
+	// d.waitForDMA()
+	// prox := apds9960.New(machine.I2C0)
+	// d.prox = &prox
+	// d.prox.Configure(apds9960.Configuration{
+	// 	LEDBoost: 300,
+	// 	// ProximityGain:        8,
+	// 	// ProximityPulseCount:  64,
+	// 	// ProximityPulseLength: 32,
+	// })
+	// // the example I have returns 0xA8 for the device ID, not 0xAB, so the driver thinks it isn't there.
+	// // but it does actually work, so I guess just always assume it's there
+	// // if d.prox.Connected() && d.prox.ProximityAvailable() {
+	// d.prox.EnableProximity()
+	// _ = buf.Println(".")
+	// // } else {
+	// // 	_ = buf.PrintlnInverse(": unavailable")
+	// // 	d.prox = nil
+	// // }
 
 	_ = buf.Print("Accelerometer")
 	d.waitForDMA()
@@ -345,6 +324,32 @@ func (*driver) LateInit(buf *textbuf.Buffer) {
 		println("accelerometer:", err)
 		_ = buf.PrintlnInverse(": unavailable")
 		d.accel = nil
+	}
+
+	_ = buf.Print("Mic")
+	d.mic = mic.New(machine.PA07, 100)
+
+	_ = buf.Print(".\nGPIO")
+	d.gpio = pcf8574.New(machine.I2C0)
+	d.gpio.Configure(pcf8574.Config{
+		Address: pcf8574Address,
+	})
+
+	_ = buf.Print(".\nCapacitive Touch")
+	d.touch = mpr121.New(machine.I2C0)
+	err = d.touch.Configure(mpr121.Config{
+		Address:          mpr121.DefaultAddress,
+		TouchThreshold:   0x10,
+		ReleaseThreshold: 0x05,
+		ProximityMode:    0,
+		AutoConfig:       true,
+	})
+	if err != nil {
+		println("capacitive touch: " + err.Error())
+		_ = buf.PrintlnInverse(": " + err.Error())
+		d.touch = nil
+	} else {
+		_ = buf.Println(".")
 	}
 
 	_ = buf.Print("Flash")
@@ -384,19 +389,54 @@ func (*driver) LateInit(buf *textbuf.Buffer) {
 }
 
 func (d *driver) PressedButton() gotogen.MenuButton {
+
 	cur := byte(0)
 	// buttons use pull-up resistors and short to ground, so they are *false* when pressed
-	if !up.Get() {
+	if !machine.BUTTON_UP.Get() {
 		cur |= 1 << gotogen.MenuButtonUp
 	}
-	if !down.Get() {
+	if !machine.BUTTON_DOWN.Get() {
 		cur |= 1 << gotogen.MenuButtonDown
 	}
-	if !back.Get() {
-		cur |= 1 << gotogen.MenuButtonBack
-	}
-	if !menu.Get() {
-		cur |= 1 << gotogen.MenuButtonMenu
+
+	// TODO check the "interrupt" input from the PCF8574 before asking for its values
+	r, err := d.gpio.Read()
+	if err != nil {
+		println("reading GPIO expander: " + err.Error())
+	} else {
+		if !r.Pin(0) {
+			cur |= 1 << gotogen.MenuButtonBack
+		}
+		if !r.Pin(1) {
+			cur |= 1 << gotogen.MenuButtonMenu
+		}
+		if !r.Pin(2) {
+			cur |= 1 << gotogen.MenuButtonUp
+		}
+		if !r.Pin(3) {
+			cur |= 1 << gotogen.MenuButtonDown
+		}
+
+		// capacitive touch "interrupt"
+		if !r.Pin(7) && d.touch != nil {
+			tr, err := d.touch.Status()
+			if err != nil {
+				println("reading capacitive touch: " + err.Error())
+			} else {
+				if tr.Touched(0) {
+					cur |= 1 << gotogen.MenuButtonBack
+				}
+				if tr.Touched(1) {
+					cur |= 1 << gotogen.MenuButtonMenu
+				}
+				if tr.Touched(2) {
+					cur |= 1 << gotogen.MenuButtonUp
+				}
+				if tr.Touched(3) {
+					cur |= 1 << gotogen.MenuButtonDown
+				}
+			}
+		}
 	}
 
 	if cur == d.lastButton {
@@ -424,14 +464,15 @@ func (d *driver) PressedButton() gotogen.MenuButton {
 }
 
 func (d *driver) BoopDistance() (uint8, gotogen.SensorStatus) {
-	if d.prox == nil {
-		return 0, gotogen.SensorStatusUnavailable
-	}
-	if d.menuDisp.Busy() {
-		return 0, gotogen.SensorStatusBusy
-	}
-	// TODO normalize
-	return uint8(d.prox.ReadProximity()), gotogen.SensorStatusAvailable
+	return 0, gotogen.SensorStatusUnavailable
+	// if d.prox == nil {
+	// 	return 0, gotogen.SensorStatusUnavailable
+	// }
+	// if d.menuDisp.Busy() {
+	// 	return 0, gotogen.SensorStatusBusy
+	// }
+	// // TODO normalize
+	// return uint8(d.prox.ReadProximity()), gotogen.SensorStatusAvailable
 }
 
 func (d *driver) Accelerometer() (int32, int32, int32, gotogen.SensorStatus) {
@@ -445,6 +486,10 @@ func (d *driver) Accelerometer() (int32, int32, int32, gotogen.SensorStatus) {
 	// this never returns an error...
 	x, y, z, _ := d.accel.ReadAcceleration()
 	return x / 1000, y / 1000, z / 1000, gotogen.SensorStatusAvailable
+}
+
+func (d *driver) Talking() bool {
+	return d.mic.Value() > d.talkCutoff
 }
 
 func (d *driver) MenuItems() []gotogen.Item {
@@ -464,6 +509,12 @@ func (d *driver) MenuItems() []gotogen.Item {
 		&gotogen.ActionItem{
 			Name:   "Set time from NTP",
 			Invoke: d.setTime,
+		},
+		&gotogen.SettingItem{
+			Name:    "Talking cutoff",
+			Options: []string{"2000", "2500", "3000", "3500", "4000", "4500", "5000"},
+			Active:  uint8((d.talkCutoff - 2000) / 500),
+			Apply:   d.setTalkCutoff,
 		},
 		&gotogen.Menu{
 			Name: "Format flash",
@@ -500,6 +551,10 @@ func (d *driver) setTime() {
 			_ = buf.Println(".")
 		}
 	})
+}
+
+func (d *driver) setTalkCutoff(s uint8) {
+	d.talkCutoff = 2000 + 500*float32(s)
 }
 
 func (d *driver) setBrightness(s uint8) {
