@@ -82,6 +82,8 @@ type DMADescriptor struct {
 type driver struct {
 	g *gotogen.Gotogen
 
+	np ws2812.Device
+
 	lastButton byte
 	menuDisp   *dispWrapper
 	faceDisp   *rgbWrapper
@@ -98,6 +100,8 @@ type driver struct {
 }
 
 var d = driver{
+	np: ws2812.New(machine.NEOPIXEL),
+
 	// TODO load from settings
 	talkCutoff: 3000,
 }
@@ -111,6 +115,13 @@ type rgbWrapper struct {
 }
 
 func main() {
+	// enable the cache controller to massively increase execution speed
+	sam.CMCC.CTRL.SetBits(sam.CMCC_CTRL_CEN)
+
+	// turn on the NeoPixel to indicate boot
+	machine.NEOPIXEL.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	_ = d.np.WriteColors([]color.RGBA{{R: 0x30, B: 0x30}})
+
 	time.Local = time.FixedZone("local", int(tzOffset.Seconds()))
 	time.Sleep(time.Second)
 	err := machine.I2C0.Configure(machine.I2CConfig{
@@ -158,12 +169,13 @@ func main() {
 	if err != nil {
 		earlyPanic(err)
 	}
+
+	d.g = g
 	err = g.Init()
 	if err != nil {
 		earlyPanic(err)
 	}
 
-	d.g = g
 	d.g.Run()
 }
 
@@ -181,11 +193,6 @@ func (d *driver) waitForDMA() {
 }
 
 func (d *driver) EarlyInit() (faceDisplay gotogen.Display, err error) {
-	// turn off the NeoPixel
-	machine.NEOPIXEL.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	np := ws2812.New(machine.NEOPIXEL)
-	_ = np.WriteColors([]color.RGBA{{}})
-
 	err = matrixSPI.Configure(machine.SPIConfig{
 		SDI:       matrixSDI,
 		SDO:       matrixSDO,
@@ -233,7 +240,7 @@ func (d *driver) EarlyInit() (faceDisplay gotogen.Display, err error) {
 	return d.faceDisp, nil
 }
 
-func (*driver) LateInit(buf *textbuf.Buffer) {
+func (d *driver) LateInit(buf *textbuf.Buffer) {
 	_ = buf.Print("Reading RTC")
 	d.waitForDMA()
 	d.rtc = pcf8523.New(machine.I2C0)
@@ -386,6 +393,9 @@ func (*driver) LateInit(buf *textbuf.Buffer) {
 			}
 		}
 	}
+
+	// turn off the NeoPixel
+	_ = d.np.WriteColors([]color.RGBA{{}})
 }
 
 func (d *driver) PressedButton() gotogen.MenuButton {
