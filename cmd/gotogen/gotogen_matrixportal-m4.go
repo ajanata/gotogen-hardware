@@ -84,16 +84,17 @@ type driver struct {
 
 	np ws2812.Device
 
-	lastButton byte
-	menuDisp   *dispWrapper
-	faceDisp   *rgbWrapper
-	rtc        pcf8523.Device
-	prox       *apds9960.Device
-	accel      *lis3dh.Device
-	fl         *flash.Device
-	fs         tinyfs.Filesystem
-	gpio       *pcf8574.Device
-	touch      *mpr121.Device
+	lastButton   byte
+	menuDisp     *dispWrapper
+	faceDisp     *rgbWrapper
+	rtc          pcf8523.Device
+	prox         *apds9960.Device
+	accel        *lis3dh.Device
+	fl           *flash.Device
+	fs           tinyfs.Filesystem
+	gpio         *pcf8574.Device
+	touch        *mpr121.Device
+	touchEnabled bool
 
 	mic        *mic.Mic
 	talkCutoff float32
@@ -138,8 +139,11 @@ func main() {
 		SCK:       oledSCK,
 		SDO:       oledMOSI,
 		SDI:       machine.NoPin,
-		Frequency: 10 * machine.MHz,
+		Frequency: 20 * machine.MHz,
 	})
+	if err != nil {
+		earlyPanic(err)
+	}
 
 	// Init DMAC.
 	// First configure the clocks, then configure the DMA descriptors. Those
@@ -153,13 +157,23 @@ func main() {
 	sam.DMAC.CTRL.SetBits(sam.DMAC_CTRL_DMAENABLE | sam.DMAC_CTRL_LVLEN0 | sam.DMAC_CTRL_LVLEN1 | sam.DMAC_CTRL_LVLEN2 | sam.DMAC_CTRL_LVLEN3)
 
 	// non-DMA SPI
-	disp := ssd1306.NewSPI(oledSPI, oledDC, oledRST, oledCS)
-	d.menuDisp = &dispWrapper{Device: &disp}
+	// disp := ssd1306.NewSPI(oledSPI, oledDC, oledRST, oledCS)
+	// DMA SPI
+	disp := ssd1306.NewSPIDMA(&oledSPI, oledDC, oledRST, oledCS, &ssd1306.DMAConfig{
+		DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
+		DMAChannel:    1,
+		TriggerSource: 0x05, // SERCOM0_DMAC_ID_TX
+	})
+
+	d.menuDisp = &dispWrapper{Device: disp}
 	d.menuDisp.Configure(ssd1306.Config{
 		Width:    128,
 		Height:   64,
 		VccState: ssd1306.SWITCHCAPVCC,
 	})
+	oledInt := interrupt.New(sam.IRQ_SERCOM0_1, oledDMAInt)
+	oledInt.SetPriority(0xC0)
+	oledInt.Enable()
 
 	d.menuDisp.ClearDisplay()
 
@@ -177,6 +191,10 @@ func main() {
 	}
 
 	d.g.Run()
+}
+
+func oledDMAInt(i interrupt.Interrupt) {
+	d.menuDisp.SPITXComplete(i)
 }
 
 func (w *dispWrapper) CanUpdateNow() bool {
@@ -398,8 +416,25 @@ func (d *driver) LateInit(buf *textbuf.Buffer) {
 	_ = d.np.WriteColors([]color.RGBA{{}})
 }
 
-func (d *driver) PressedButton() gotogen.MenuButton {
+const (
+	ioBack = iota
+	ioMenu
+	ioUp
+	ioDown
+	ioExtra1
+	ioExtra2
+	ioToggleTouch
+	ioTouchEvent
+)
 
+const (
+	touchMenu = iota
+	touchBack
+	touchDown
+	touchUp
+)
+
+func (d *driver) PressedButton() gotogen.MenuButton {
 	cur := byte(0)
 	// buttons use pull-up resistors and short to ground, so they are *false* when pressed
 	if !machine.BUTTON_UP.Get() {
@@ -414,36 +449,39 @@ func (d *driver) PressedButton() gotogen.MenuButton {
 	if err != nil {
 		println("reading GPIO expander: " + err.Error())
 	} else {
-		if !r.Pin(0) {
-			cur |= 1 << gotogen.MenuButtonBack
+		if !r.Pin(ioBack) {
+			cur |= 1 << ioBack
 		}
-		if !r.Pin(1) {
-			cur |= 1 << gotogen.MenuButtonMenu
+		if !r.Pin(ioMenu) {
+			cur |= 1 << ioMenu
 		}
-		if !r.Pin(2) {
-			cur |= 1 << gotogen.MenuButtonUp
+		if !r.Pin(ioUp) {
+			cur |= 1 << ioUp
 		}
-		if !r.Pin(3) {
-			cur |= 1 << gotogen.MenuButtonDown
+		if !r.Pin(ioDown) {
+			cur |= 1 << ioDown
+		}
+		if !r.Pin(ioToggleTouch) {
+			cur |= 1 << ioToggleTouch
 		}
 
 		// capacitive touch "interrupt"
-		if !r.Pin(7) && d.touch != nil {
+		if !r.Pin(ioTouchEvent) && d.touch != nil {
 			tr, err := d.touch.Status()
 			if err != nil {
 				println("reading capacitive touch: " + err.Error())
-			} else {
-				if tr.Touched(0) {
-					cur |= 1 << gotogen.MenuButtonBack
+			} else if d.touchEnabled {
+				if tr.Touched(touchMenu) {
+					cur |= 1 << ioMenu
 				}
-				if tr.Touched(1) {
-					cur |= 1 << gotogen.MenuButtonMenu
+				if tr.Touched(touchBack) {
+					cur |= 1 << ioBack
 				}
-				if tr.Touched(2) {
-					cur |= 1 << gotogen.MenuButtonUp
+				if tr.Touched(touchDown) {
+					cur |= 1 << ioDown
 				}
-				if tr.Touched(3) {
-					cur |= 1 << gotogen.MenuButtonDown
+				if tr.Touched(touchUp) {
+					cur |= 1 << ioUp
 				}
 			}
 		}
@@ -456,17 +494,20 @@ func (d *driver) PressedButton() gotogen.MenuButton {
 
 	d.lastButton = cur
 	// some button has changed
-	if cur&(1<<gotogen.MenuButtonUp) > 0 {
+	if cur&(1<<ioUp) > 0 {
 		return gotogen.MenuButtonUp
 	}
-	if cur&(1<<gotogen.MenuButtonDown) > 0 {
+	if cur&(1<<ioDown) > 0 {
 		return gotogen.MenuButtonDown
 	}
-	if cur&(1<<gotogen.MenuButtonBack) > 0 {
+	if cur&(1<<ioBack) > 0 {
 		return gotogen.MenuButtonBack
 	}
-	if cur&(1<<gotogen.MenuButtonMenu) > 0 {
+	if cur&(1<<ioMenu) > 0 {
 		return gotogen.MenuButtonMenu
+	}
+	if cur&(1<<ioToggleTouch) > 0 {
+		d.touchEnabled = !d.touchEnabled
 	}
 
 	// guess they let go of all the buttons
@@ -542,6 +583,13 @@ func (d *driver) MenuItems() []gotogen.Item {
 	}
 
 	return m
+}
+
+func (d *driver) StatusLine() string {
+	if d.touchEnabled {
+		return "Touch: on"
+	}
+	return "Touch: off"
 }
 
 func (d *driver) setTime() {

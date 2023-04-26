@@ -13,14 +13,13 @@ import (
 	"unsafe"
 
 	"github.com/ajanata/textbuf"
-	"github.com/aykevl/things/hub75"
 	"tinygo.org/x/drivers/ssd1306"
 	"tinygo.org/x/drivers/ws2812"
 )
 
 const dmaDescriptors = 2
 
-var disp ssd1306.Device
+var disp *ssd1306.Device
 
 var last = newBuf(100)
 var adc machine.ADC
@@ -35,6 +34,21 @@ const (
 	matrixSCK = machine.PB09
 	matrixSDO = machine.PB08
 	matrixSDI = machine.NoPin
+)
+
+// and using SERCOM0 for SPI for the OLED display
+var oledSPI = machine.SPI{
+	Bus:    sam.SERCOM0_SPIM,
+	SERCOM: 0,
+}
+
+// pins for SERCOM0
+const (
+	oledMOSI = machine.PA04
+	oledSCK  = machine.PA05
+	oledCS   = machine.PB01
+	oledDC   = machine.PB15
+	oledRST  = machine.PB04
 )
 
 //go:align 16
@@ -79,15 +93,11 @@ func main() {
 	}
 	blink()
 
-	spi := machine.SPI{
-		Bus:    sam.SERCOM0_SPIM,
-		SERCOM: 0,
-	}
-	err = spi.Configure(machine.SPIConfig{
-		Frequency: 10 * machine.MHz,
-		SCK:       machine.PA05,
-		SDO:       machine.PA04,
+	err = oledSPI.Configure(machine.SPIConfig{
+		SCK:       oledSCK,
+		SDO:       oledMOSI,
 		SDI:       machine.NoPin,
+		Frequency: 20 * machine.MHz,
 	})
 	if err != nil {
 		panic(err)
@@ -104,7 +114,6 @@ func main() {
 	// Enable peripheral with all priorities.
 	sam.DMAC.CTRL.SetBits(sam.DMAC_CTRL_DMAENABLE | sam.DMAC_CTRL_LVLEN0 | sam.DMAC_CTRL_LVLEN1 | sam.DMAC_CTRL_LVLEN2 | sam.DMAC_CTRL_LVLEN3)
 
-	//
 	// disp = ssd1306.NewI2CDMA(machine.I2C0, &ssd1306.DMAConfig{
 	// 	DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
 	// 	DMAChannel:    1,
@@ -118,20 +127,35 @@ func main() {
 	// disp.ClearDisplay()
 	// blink()
 
-	// disp = ssd1306.NewI2C(machine.I2C0)
-	disp = ssd1306.NewSPI(spi, machine.PB01, machine.PB04, machine.PB13)
-	disp.Configure(ssd1306.Config{
-		Width:  128,
-		Height: 64,
-		// Address: 0x3D,
-		VccState: ssd1306.SWITCHCAPVCC,
+	disp = ssd1306.NewSPIDMA(&oledSPI, oledDC, oledRST, oledCS, &ssd1306.DMAConfig{
+		DMADescriptor: (*ssd1306.DMADescriptor)(&DMADescriptorSection[1]),
+		DMAChannel:    1,
+		TriggerSource: 0x05, // SERCOM0_DMAC_ID_TX
 	})
+	// disp.Configure(ssd1306.Config{Width: 128, Height: 64, Address: 0x3D, VccState: ssd1306.SWITCHCAPVCC})
+	disp.Configure(ssd1306.Config{Width: 128, Height: 64, VccState: ssd1306.SWITCHCAPVCC})
+	i2cInt := interrupt.New(sam.IRQ_SERCOM0_1, dispDMAInt)
+	i2cInt.SetPriority(0xC0)
+	i2cInt.Enable()
 	blink()
-
 	disp.ClearDisplay()
 	blink()
 
-	buf, err := textbuf.New(&disp, textbuf.FontSize6x8)
+	// dd := ssd1306.NewI2C(machine.I2C0)
+	// dd := ssd1306.NewSPI(oledSPI, oledDC, oledRST, oledCS)
+	// disp = &dd
+	// disp.Configure(ssd1306.Config{
+	// 	Width:  128,
+	// 	Height: 64,
+	// 	// Address: 0x3D,
+	// 	VccState: ssd1306.SWITCHCAPVCC,
+	// })
+	// blink()
+	//
+	// disp.ClearDisplay()
+	// blink()
+
+	buf, err := textbuf.New(disp, textbuf.FontSize6x8)
 	if err != nil {
 		panic(err)
 	}
@@ -142,50 +166,50 @@ func main() {
 	for disp.Busy() {
 	}
 
-	err = matrixSPI.Configure(machine.SPIConfig{
-		SDI:       matrixSDI,
-		SDO:       matrixSDO,
-		SCK:       matrixSCK,
-		Frequency: 12 * machine.MHz,
-	})
-
-	rgb := hub75.New(hub75.Config{
-		DeviceConfig: hub75.DeviceConfig{
-			Bus:                   &matrixSPI,
-			TriggerSource:         0x0D, // SERCOM4_DMAC_ID_TX
-			OETimerCounterControl: sam.TCC3,
-			TimerChannel:          0,
-			TimerIntenset:         sam.TCC_INTENSET_MC0,
-			DMAChannel:            0,
-			DMADescriptor:         (*hub75.DmaDescriptor)(&DMADescriptorSection[0]),
-		},
-		Data:         matrixSDO,
-		Clock:        matrixSCK,
-		Latch:        machine.PB06,
-		OutputEnable: machine.HUB75_OE,
-		A:            machine.PB00,
-		B:            machine.PB02,
-		C:            machine.PB03,
-		D:            machine.PB05,
-		Brightness:   0x20,
-		NumScreens:   4, // screens are 32x32 as far as this driver is concerned
-	})
-	spiInt := interrupt.New(sam.IRQ_SERCOM4_1, hub75.SPIHandler)
-	spiInt.SetPriority(0xC0)
-	spiInt.Enable()
-	rgbTimerInt := interrupt.New(sam.IRQ_TCC3_MC0, hub75.TimerHandler)
-	rgbTimerInt.SetPriority(0xC0)
-	rgbTimerInt.Enable()
-
-	for x := int16(0); x < 128; x++ {
-		for y := int16(0); y < 32; y++ {
-			rgb.SetPixel(x, y, color.RGBA{R: 0xFF})
-		}
-	}
-	err = rgb.Display()
-	if err != nil {
-		panic(err)
-	}
+	// err = matrixSPI.Configure(machine.SPIConfig{
+	// 	SDI:       matrixSDI,
+	// 	SDO:       matrixSDO,
+	// 	SCK:       matrixSCK,
+	// 	Frequency: 12 * machine.MHz,
+	// })
+	//
+	// rgb := hub75.New(hub75.Config{
+	// 	DeviceConfig: hub75.DeviceConfig{
+	// 		Bus:                   &matrixSPI,
+	// 		TriggerSource:         0x0D, // SERCOM4_DMAC_ID_TX
+	// 		OETimerCounterControl: sam.TCC3,
+	// 		TimerChannel:          0,
+	// 		TimerIntenset:         sam.TCC_INTENSET_MC0,
+	// 		DMAChannel:            0,
+	// 		DMADescriptor:         (*hub75.DmaDescriptor)(&DMADescriptorSection[0]),
+	// 	},
+	// 	Data:         matrixSDO,
+	// 	Clock:        matrixSCK,
+	// 	Latch:        machine.PB06,
+	// 	OutputEnable: machine.HUB75_OE,
+	// 	A:            machine.PB00,
+	// 	B:            machine.PB02,
+	// 	C:            machine.PB03,
+	// 	D:            machine.PB05,
+	// 	Brightness:   0x20,
+	// 	NumScreens:   4, // screens are 32x32 as far as this driver is concerned
+	// })
+	// spiInt := interrupt.New(sam.IRQ_SERCOM4_1, hub75.SPIHandler)
+	// spiInt.SetPriority(0xC0)
+	// spiInt.Enable()
+	// rgbTimerInt := interrupt.New(sam.IRQ_TCC3_MC0, hub75.TimerHandler)
+	// rgbTimerInt.SetPriority(0xC0)
+	// rgbTimerInt.Enable()
+	//
+	// for x := int16(0); x < 128; x++ {
+	// 	for y := int16(0); y < 32; y++ {
+	// 		rgb.SetPixel(x, y, color.RGBA{R: 0xFF})
+	// 	}
+	// }
+	// err = rgb.Display()
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	// prox := apds9960.New(machine.I2C0)
 	// prox.Configure(apds9960.Configuration{})
@@ -366,5 +390,6 @@ func (b *buffer) Max() uint16 {
 }
 
 func dispDMAInt(i interrupt.Interrupt) {
-	disp.TXComplete(i)
+	// disp.TXComplete(i)
+	disp.SPITXComplete(i)
 }
