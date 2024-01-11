@@ -432,6 +432,8 @@ const (
 	touchBack
 	touchDown
 	touchUp
+	touchExtra1
+	touchExtra2
 )
 
 func (d *driver) PressedButton() gotogen.MenuButton {
@@ -471,7 +473,7 @@ func (d *driver) PressedButton() gotogen.MenuButton {
 			if err != nil {
 				println("reading capacitive touch: " + err.Error())
 			} else if d.touchEnabled {
-				if tr.Touched(touchMenu) {
+				if tr.Touched(touchMenu) || tr.Touched(touchExtra1) || tr.Touched(touchExtra2) {
 					cur |= 1 << ioMenu
 				}
 				if tr.Touched(touchBack) {
