@@ -95,6 +95,7 @@ type driver struct {
 	gpio         *pcf8574.Device
 	touch        *mpr121.Device
 	touchEnabled bool
+	micEnabled   bool
 
 	mic        *mic.Mic
 	talkCutoff float32
@@ -421,7 +422,7 @@ const (
 	ioMenu
 	ioUp
 	ioDown
-	ioExtra1
+	ioToggleMic
 	ioExtra2
 	ioToggleTouch
 	ioTouchEvent
@@ -462,6 +463,9 @@ func (d *driver) PressedButton() gotogen.MenuButton {
 		}
 		if !r.Pin(ioDown) {
 			cur |= 1 << ioDown
+		}
+		if !r.Pin(ioToggleMic) {
+			cur |= 1 << ioToggleMic
 		}
 		if !r.Pin(ioToggleTouch) {
 			cur |= 1 << ioToggleTouch
@@ -508,6 +512,9 @@ func (d *driver) PressedButton() gotogen.MenuButton {
 	if cur&(1<<ioMenu) > 0 {
 		return gotogen.MenuButtonMenu
 	}
+	if cur&(1<<ioToggleMic) > 0 {
+		d.micEnabled = !d.micEnabled
+	}
 	if cur&(1<<ioToggleTouch) > 0 {
 		d.touchEnabled = !d.touchEnabled
 	}
@@ -542,7 +549,7 @@ func (d *driver) Accelerometer() (int32, int32, int32, gotogen.SensorStatus) {
 }
 
 func (d *driver) Talking() bool {
-	return d.mic.Value() > d.talkCutoff
+	return d.micEnabled && d.mic.Value() > d.talkCutoff
 }
 
 func (d *driver) MenuItems() []gotogen.Item {
@@ -588,10 +595,15 @@ func (d *driver) MenuItems() []gotogen.Item {
 }
 
 func (d *driver) StatusLine() string {
+	touch := "off"
 	if d.touchEnabled {
-		return "Touch: on"
+		touch = "on"
 	}
-	return "Touch: off"
+	mic := "off"
+	if d.micEnabled {
+		mic = "on"
+	}
+	return "Touch: " + touch + " Mic: " + mic
 }
 
 func (d *driver) setTime() {
