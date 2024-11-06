@@ -33,7 +33,7 @@ import (
 // const pcf8574Address = 0x20 // adafruit breakout
 const pcf8574Address = pcf8574.DefaultAddress // bare chip
 
-const ntpHost = "time.nist.gov"
+const ntpHost = "time.nist.gov:123"
 
 // we're using SERCOM4 for SPI on the built-in matrix connector, so we have to define it ourselves
 var matrixSPI = machine.SPI{
