@@ -33,7 +33,7 @@ import (
 // const pcf8574Address = 0x20 // adafruit breakout
 const pcf8574Address = pcf8574.DefaultAddress // bare chip
 
-const ntpHost = "time.nist.gov"
+const ntpHost = "time.nist.gov:123"
 
 // we're using SERCOM4 for SPI on the built-in matrix connector, so we have to define it ourselves
 var matrixSPI = machine.SPI{
@@ -260,60 +260,9 @@ func (d *driver) EarlyInit() (faceDisplay gotogen.Display, err error) {
 }
 
 func (d *driver) LateInit(buf *textbuf.Buffer) {
-	_ = buf.Print("Reading RTC")
-	d.waitForDMA()
-	d.rtc = pcf8523.New(machine.I2C0)
-	rtcGood := false
-	lost, err := d.rtc.LostPower()
-	if err != nil {
-		println("rtc lost power check:", err)
-		_ = buf.PrintlnInverse(": " + err.Error())
-		_ = buf.Println("Skipping RTC")
-	} else {
-		init, err := d.rtc.Initialized()
-		if err != nil {
-			println("rtc initialized check:", err)
-			_ = buf.PrintlnInverse(": " + err.Error())
-			_ = buf.Println("Skipping RTC")
-		} else {
-			if init && !lost {
-				now, err := d.rtc.Now()
-				if err != nil {
-					println("rtc read:", err)
-					_ = buf.PrintlnInverse(": " + err.Error())
-					_ = buf.Println("Skipping RTC")
-				} else {
-					runtime.AdjustTimeOffset(-1 * int64(time.Since(now)))
-					if now.Year() > 2050 || now.Year() < 2022 {
-						_ = buf.PrintlnInverse(": bogus")
-						println("rtc bogus: ", now.String())
-					} else {
-						_ = buf.Println(".")
-						println("using rtc")
-						rtcGood = true
-					}
-				}
-			} else {
-				println("not using rtc")
-				_ = buf.PrintlnInverse(": RTC lost power or not set, ignoring")
-			}
-		}
-	}
+	var err error
 
-	if !rtcGood {
-		// TODO check a button for bypass (e.g. if known that wifi network isn't in range)
-		err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, buf)
-		if err != nil {
-			println("ntp:", err)
-		} else {
-			println(time.Now().String())
-			d.waitForDMA()
-			err := d.rtc.Set(time.Now().In(time.UTC))
-			if err != nil {
-				println("setting rtc:", err)
-			}
-		}
-	}
+	d.initRTC(buf)
 
 	// boop sensor isn't working through the visor :(
 	// _ = buf.Print("Proximity")
@@ -415,6 +364,53 @@ func (d *driver) LateInit(buf *textbuf.Buffer) {
 
 	// turn off the NeoPixel
 	_ = d.np.WriteColors([]color.RGBA{{}})
+}
+
+func (d *driver) initRTC(buf *textbuf.Buffer) {
+	_ = buf.Print("Reading RTC")
+	d.waitForDMA()
+	d.rtc = pcf8523.New(machine.I2C0)
+	rtcGood := false
+
+	err := d.rtc.Reset()
+	if err != nil {
+		println("rtc init failed: ", err)
+		_ = buf.PrintlnInverse(": " + err.Error())
+		_ = buf.Println("Skipping RTC")
+	} else {
+		now, err := d.rtc.ReadTime()
+		if err != nil {
+			println("rtc read:", err)
+			_ = buf.PrintlnInverse(": " + err.Error())
+			_ = buf.Println("Skipping RTC")
+		} else {
+			runtime.AdjustTimeOffset(-1 * int64(time.Since(now)))
+			if now.Year() > 2050 || now.Year() < 2022 {
+				_ = buf.PrintlnInverse(": bogus")
+				println("rtc bogus: ", now.String())
+			} else {
+				_ = buf.Println(".")
+				println("using rtc")
+				rtcGood = true
+			}
+		}
+	}
+
+	if !rtcGood {
+		// TODO check a button for bypass (e.g. if known that wifi network isn't in range)
+		err := ntp.NTP(ntpHost, wifiSSID, wifiPassword, buf)
+		if err != nil {
+			println("ntp:", err)
+		} else {
+			println(time.Now().String())
+			d.waitForDMA()
+			err := d.rtc.SetTime(time.Now().In(time.UTC))
+			if err != nil {
+				println("setting rtc:", err)
+			}
+			// d.rtc.SetPowerManagement(pcf8523.PowerManagement_SwitchOver_ModeStandard)
+		}
+	}
 }
 
 const (
@@ -616,7 +612,7 @@ func (d *driver) setTime() {
 			_ = buf.Println(time.Now().Format(time.Stamp))
 			_ = buf.Print("Setting RTC")
 			d.waitForDMA()
-			err := d.rtc.Set(time.Now().In(time.UTC))
+			err := d.rtc.SetTime(time.Now().In(time.UTC))
 			if err != nil {
 				_ = buf.PrintlnInverse("rtc: " + err.Error())
 			}
