@@ -1,69 +1,49 @@
 package ntp
 
 import (
-	"errors"
 	"fmt"
-	"github.com/ajanata/textbuf"
-	"machine"
+	"io"
+	"net"
 	"runtime"
 	"time"
-	"tinygo.org/x/drivers/net"
-	"tinygo.org/x/drivers/wifinina"
+
+	"github.com/ajanata/textbuf"
+	"tinygo.org/x/drivers/netlink"
+	"tinygo.org/x/drivers/netlink/probe"
 )
 
 const ntpPacketSize = 48
-
-var b = make([]byte, ntpPacketSize)
-var wifi *wifinina.Device
 
 // NTP connects to the given Wi-Fi network and sends an NTP request to the given host. If no errors occur, and a
 // response is received, the time offset is adjusted so that the current time returned by time.Now() is approximately
 // correct.
 //
-// TODO: pass in the Nina coprocessor device so we don't have to rely on the machine package providing it?
-//
-// based on https://github.com/tinygo-org/drivers/blob/release/examples/wifinina/ntpclient/main.go
+// based on https://github.com/tinygo-org/drivers/blob/release/examples/net/ntpclient/main.go
 func NTP(ntpHost, wifiSSID, wifiPassword string, buf *textbuf.Buffer) error {
 	_ = buf.Print("Wifi: init")
-	if wifi == nil {
-		err := machine.NINA_SPI.Configure(machine.SPIConfig{
-			Frequency: 8 * machine.MHz,
-			SDO:       machine.NINA_SDO,
-			SDI:       machine.NINA_SDI,
-			SCK:       machine.NINA_SCK,
-		})
-		if err != nil {
-			return err
-		}
-
-		wifi = wifinina.New(machine.NINA_SPI,
-			machine.NINA_CS,
-			machine.NINA_ACK,
-			machine.NINA_GPIO0,
-			machine.NINA_RESETN)
-		wifi.Configure()
-		time.Sleep(1 * time.Second)
-	}
+	linker, dever := probe.Probe()
+	time.Sleep(1 * time.Second)
 
 	_ = buf.Println(".\nConnect: " + wifiSSID)
-	err := wifi.ConnectToAccessPoint(wifiSSID, wifiPassword, 10*time.Second)
+	err := linker.NetConnect(&netlink.ConnectParams{
+		Ssid:           wifiSSID,
+		Passphrase:     wifiPassword,
+		AuthType:       netlink.AuthTypeWPA2,
+		ConnectTimeout: 10 * time.Second,
+	})
 	if err != nil {
 		return err
 	}
 
 	_ = buf.Print("DHCP: ")
 	time.Sleep(time.Second)
-	myIP, _, _, err := wifi.GetIP()
+	myIP, err := dever.Addr()
 	if err != nil {
 		return err
 	}
 	_ = buf.Print(myIP.String() + "\nSetting time")
 
-	// now make UDP connection
-	ip := net.ParseIP(ntpHost)
-	raddr := &net.UDPAddr{IP: ip, Port: 123}
-	laddr := &net.UDPAddr{Port: 2390}
-	conn, err := net.DialUDP("udp", laddr, raddr)
+	conn, err := net.Dial("udp", ntpHost)
 	if err != nil {
 		return err
 	}
@@ -74,55 +54,44 @@ func NTP(ntpHost, wifiSSID, wifiPassword string, buf *textbuf.Buffer) error {
 	runtime.AdjustTimeOffset(-1 * int64(time.Since(t)))
 	_ = buf.Println(".")
 
+	_ = conn.Close()
+	linker.NetDisconnect()
+	linker = nil
+	dever = nil
+
 	return nil
 }
 
-func getCurrentTime(conn *net.UDPSerialConn) (time.Time, error) {
+func getCurrentTime(conn net.Conn) (time.Time, error) {
 	if err := sendNTPpacket(conn); err != nil {
 		return time.Time{}, err
 	}
-	clearBuffer()
-	for now := time.Now(); time.Since(now) < time.Second; {
-		time.Sleep(5 * time.Millisecond)
-		if n, err := conn.Read(b); err != nil {
-			return time.Time{}, fmt.Errorf("error reading UDP packet: %w", err)
-		} else if n == 0 {
-			continue // no packet received yet
-		} else if n != ntpPacketSize {
-			return time.Time{}, fmt.Errorf("expected NTP packet size of %d: %d", ntpPacketSize, n)
-		}
-		return parseNTPpacket(), nil
+
+	response := make([]byte, ntpPacketSize)
+	n, err := conn.Read(response)
+	if err != nil && err != io.EOF {
+		return time.Time{}, err
 	}
-	return time.Time{}, errors.New("no packet received after 1 second")
+	if n != ntpPacketSize {
+		return time.Time{}, fmt.Errorf("expected NTP packet size of %d: %d", ntpPacketSize, n)
+	}
+
+	return parseNTPPacket(response), nil
 }
 
-func clearBuffer() {
-	for i := range b {
-		b[i] = 0
+func sendNTPpacket(conn net.Conn) error {
+	var request = [48]byte{
+		0xe3,
 	}
+
+	_, err := conn.Write(request[:])
+	return err
 }
 
-func sendNTPpacket(conn *net.UDPSerialConn) error {
-	clearBuffer()
-	b[0] = 0b11100011 // LI, Version, Mode
-	b[1] = 0          // Stratum, or type of clock
-	b[2] = 6          // Polling Interval
-	b[3] = 0xEC       // Peer Clock Precision
-	// 8 bytes of zero for Root Delay & Root Dispersion
-	b[12] = 49
-	b[13] = 0x4E
-	b[14] = 49
-	b[15] = 52
-	if _, err := conn.Write(b); err != nil {
-		return err
-	}
-	return nil
-}
-
-func parseNTPpacket() time.Time {
+func parseNTPPacket(r []byte) time.Time {
 	// the timestamp starts at byte 40 of the received packet and is four bytes,
 	// this is NTP time (seconds since Jan 1 1900):
-	t := uint32(b[40])<<24 | uint32(b[41])<<16 | uint32(b[42])<<8 | uint32(b[43])
+	t := uint32(r[40])<<24 | uint32(r[41])<<16 | uint32(r[42])<<8 | uint32(r[43])
 	const seventyYears = 2208988800
 	return time.Unix(int64(t-seventyYears), 0)
 }
